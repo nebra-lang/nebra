@@ -36,7 +36,7 @@ public enum DiagnosticCode
     [Level(DiagnosticLevel.Error)]
     [Category(DiagnosticCategory.Syntax)]
     [Format("unexpected end of file")]
-    [Help("a construct was left unfinished — check for a missing 'end', ')' or '}'")]
+    [Help("a construct was left unfinished - check for a missing 'end', ')' or '}}'")]
     ErrUnexpectedEOF = 0x0001,
 
     [Level(DiagnosticLevel.Error)]
