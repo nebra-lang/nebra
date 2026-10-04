@@ -30,6 +30,20 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
+    public async Task AnUnfinishedStatementAtTheEndReportsALocatedSyntaxError()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("src/main.neb", "local count: number = 3\ncount:\n"));
+
+        var diagnostics = await session.OpenAsync("src/main.neb");
+
+        var error = Assert.Single(diagnostics);
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("end of file", error.Message);
+        Assert.True(error.Range.Start.Line > 0);
+    }
+
+    [Fact]
     public async Task EditingAFileRepublishesItsDiagnostics()
     {
         await using var session = await LspSession.StartAsync(

@@ -33,7 +33,7 @@ public sealed class CompletionTests
         Assert.Contains("reset", labels);
     }
 
-    [Fact(Skip = "#65: a member access that starts a statement completes keywords only")]
+    [Fact]
     public async Task ColonAtStatementStartOffersMethods()
     {
         await using var session = await LspSession.StartAsync(
@@ -45,7 +45,7 @@ public sealed class CompletionTests
         Assert.Contains("bump", labels);
     }
 
-    [Fact(Skip = "#65: a member access that starts a statement completes keywords only")]
+    [Fact]
     public async Task DotAtStatementStartOffersFields()
     {
         await using var session = await LspSession.StartAsync(
@@ -55,6 +55,30 @@ public sealed class CompletionTests
         var labels = await session.CompletionLabelsAsync("cursor");
 
         Assert.Contains("value", labels);
+    }
+
+    [Fact]
+    public async Task PartlyTypedMethodAtStatementStartOffersMethods()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("src/main.neb", CounterClass + "counter:b{|cursor|}\n"));
+
+        await session.OpenAsync("src/main.neb");
+        var labels = await session.CompletionLabelsAsync("cursor");
+
+        Assert.Contains("bump", labels);
+    }
+
+    [Fact]
+    public async Task UnfinishedMemberAccessFollowedByCodeOffersMethods()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("src/main.neb", CounterClass + "counter:{|cursor|}\nprint(counter.value)\n"));
+
+        await session.OpenAsync("src/main.neb");
+        var labels = await session.CompletionLabelsAsync("cursor");
+
+        Assert.Contains("bump", labels);
     }
 
     [Fact]
