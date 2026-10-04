@@ -147,8 +147,8 @@ public sealed class ResolveLibsPass() : Pass(PassName, PassScope.PerBuild)
     }
 
     /// <summary>
-    /// Re-parses the declaration source once per target package so each gets
-    /// its own private IR. NameRef/TypeRef nodes are mutated in-place during
+    /// Lowers the declaration source once per target package so each gets
+    /// its own private IR; the parse itself comes from <see cref="DeclarationParseCache"/>. NameRef/TypeRef nodes are mutated in-place during
     /// later passes (assigning <c>Sym</c>, <c>ResolvedType</c> etc.); sharing a
     /// single IR across packages would race those writes between contexts.
     /// </summary>
@@ -160,16 +160,11 @@ public sealed class ResolveLibsPass() : Pass(PassName, PassScope.PerBuild)
         if (pkgsMissingFile.Count == 0) return;
 
         var diag = context.Diag;
+        var tree = DeclarationParseCache.Parse(source);
         foreach (var pkg in pkgsMissingFile)
         {
-            var inputStream = new AntlrInputStream(source);
-            var lexer = new NebraLexer(inputStream);
-            lexer.RemoveErrorListeners();
-            var tokenStream = new CommonTokenStream(lexer);
-            var parser = new NebraParser(tokenStream);
-            parser.RemoveErrorListeners();
             var visitor = new IRVisitor(filePath, context.NodeAlloc, diag, context.Config);
-            var ir = visitor.Visit(parser.script());
+            var ir = visitor.Visit(tree);
             if (ir is not IRScript script) continue;
 
             if (disabled is { Count: > 0 })

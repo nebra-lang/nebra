@@ -1,4 +1,5 @@
-﻿using Nebra.Compiler.Annotations;
+﻿using System.Collections.Concurrent;
+using Nebra.Compiler.Annotations;
 using Nebra.Configuration;
 using Nebra.Diagnostics;
 using Nebra.IR;
@@ -82,10 +83,21 @@ public sealed class ResolveAnnotationsPass() : Pass(PassName, PassScope.PerBuild
             || text.Contains("export local function apply", StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The outcome of compiling one annotation file: its definition, or the problems that kept it
+    /// from being one.
+    /// </summary>
+    private sealed record AnnotationLoad(AnnotationDefinition? Definition, IReadOnlyList<(DiagnosticCode Code, object[] Args)> Problems);
+
+    /// <summary>
+    /// Compiled annotation files, keyed by everything the compilation depends on. Annotation
+    /// plugins change rarely, and a long-running process such as the language server would
+    /// otherwise compile each of them again on every build.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, AnnotationLoad> Loads = new(StringComparer.Ordinal);
+
     private static void LoadAnnotationFile(PassContext ctx, AnnotationRegistry registry, string path)
     {
-        var annotationName = Path.GetFileNameWithoutExtension(path);
-
         var subConfig = ctx.Config.Clone();
         subConfig.Code = new CodeSection
         {
@@ -99,8 +111,41 @@ public sealed class ResolveAnnotationsPass() : Pass(PassName, PassScope.PerBuild
             Libs = [..ctx.Config.Code.Libs],
         };
 
+        string source;
+        try
+        {
+            source = File.ReadAllText(path);
+        }
+        catch (IOException)
+        {
+            ctx.Diag.Report(TextSpan.Empty, DiagnosticCode.ErrAnnotationCompileFailed, Path.GetFileNameWithoutExtension(path));
+            return;
+        }
+
+        var key = string.Join("\0", path, source, subConfig.Target, subConfig.ProjectRoot,
+            subConfig.Code.ConcatOperator, subConfig.Code.StringInterpolation, subConfig.Code.AltBooleanOperators,
+            subConfig.Code.Semicolons, subConfig.Code.ImportStatement, subConfig.Code.StripUnused,
+            string.Join(",", subConfig.Code.Libs), string.Join(",", subConfig.Globals));
+        var load = Loads.GetOrAdd(key, _ => CompileAnnotationFile(path, source, subConfig));
+
+        foreach (var (code, args) in load.Problems)
+        {
+            ctx.Diag.Report(TextSpan.Empty, code, args);
+        }
+
+        if (load.Definition != null && !registry.TryAdd(load.Definition))
+        {
+            ctx.Diag.Report(TextSpan.Empty, DiagnosticCode.ErrAnnotationDuplicateName, load.Definition.Name);
+        }
+    }
+
+    private static AnnotationLoad CompileAnnotationFile(string path, string source, Configuration.Config subConfig)
+    {
+        var annotationName = Path.GetFileNameWithoutExtension(path);
+        var problems = new List<(DiagnosticCode, object[])>();
+
         var subCompiler = new NebraCompiler { Config = subConfig };
-        subCompiler.AddSource(path);
+        subCompiler.AddSource(path, source);
 
         var pm = new PassManager();
         pm.BuildOrder(PassManager.AnnotationFilePipeline);
@@ -110,48 +155,33 @@ public sealed class ResolveAnnotationsPass() : Pass(PassName, PassScope.PerBuild
 
         if (!ok || subCompiler.Diagnostics.HasErrors)
         {
-            ctx.Diag.Report(TextSpan.Empty, DiagnosticCode.ErrAnnotationCompileFailed, annotationName);
-            return;
+            return new AnnotationLoad(null, [(DiagnosticCode.ErrAnnotationCompileFailed, [annotationName])]);
         }
 
-        PreparsedFile? file = null;
-        foreach (var pkg in subCompiler.Packages.Values)
-        {
-            foreach (var f in pkg.Files)
-            {
-                file = f;
-                break;
-            }
-            if (file != null) break;
-        }
+        var file = subCompiler.Packages.Values.SelectMany(pkg => pkg.Files).FirstOrDefault();
         if (file == null || file.GeneratedLua == null)
         {
-            ctx.Diag.Report(TextSpan.Empty, DiagnosticCode.ErrAnnotationCompileFailed, annotationName);
-            return;
+            return new AnnotationLoad(null, [(DiagnosticCode.ErrAnnotationCompileFailed, [annotationName])]);
         }
 
         if (ContainsAnnotations(file.Hir.Body))
         {
-            ctx.Diag.Report(TextSpan.Empty, DiagnosticCode.ErrAnnotationInAnnotationFile);
+            problems.Add((DiagnosticCode.ErrAnnotationInAnnotationFile, []));
         }
 
         if (!TryExtractMeta(file.Hir.Body, out var targets, out var parameters, out var metaError))
         {
-            ctx.Diag.Report(TextSpan.Empty, DiagnosticCode.ErrAnnotationMetaInvalid, annotationName, metaError ?? "unknown");
-            return;
+            problems.Add((DiagnosticCode.ErrAnnotationMetaInvalid, [annotationName, metaError ?? "unknown"]));
+            return new AnnotationLoad(null, problems);
         }
 
         if (!HasApplyFunction(file.Hir.Body))
         {
-            ctx.Diag.Report(TextSpan.Empty, DiagnosticCode.ErrAnnotationMissingApply, annotationName);
-            return;
+            problems.Add((DiagnosticCode.ErrAnnotationMissingApply, [annotationName]));
+            return new AnnotationLoad(null, problems);
         }
 
-        var def = new AnnotationDefinition(annotationName, targets, parameters, file.GeneratedLua, path);
-        if (!registry.TryAdd(def))
-        {
-            ctx.Diag.Report(TextSpan.Empty, DiagnosticCode.ErrAnnotationDuplicateName, annotationName);
-        }
+        return new AnnotationLoad(new AnnotationDefinition(annotationName, targets, parameters, file.GeneratedLua, path), problems);
     }
 
     /// <summary>
