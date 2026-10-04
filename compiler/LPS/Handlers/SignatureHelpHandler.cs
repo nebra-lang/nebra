@@ -7,19 +7,19 @@ namespace Nebra.LPS.Handlers;
 
 public sealed class SignatureHelpHandler(NebraWorkspace workspace) : SignatureHelpHandlerBase
 {
-    public override Task<SignatureHelp?> Handle(SignatureHelpParams request, CancellationToken ct)
+    public override async Task<SignatureHelp?> Handle(SignatureHelpParams request, CancellationToken ct)
     {
-        var result = workspace.GetResult(request.TextDocument.Uri.ToString());
-        if (result == null) return Task.FromResult<SignatureHelp?>(null);
+        var result = await workspace.GetResultAsync(request.TextDocument.Uri.ToString(), ct);
+        if (result == null) return null;
 
         var line = request.Position.Line + 1;
         var col = request.Position.Character + 1;
 
         var annotationHelp = TryAnnotationSignatureHelp(result, request.Position);
-        if (annotationHelp != null) return Task.FromResult<SignatureHelp?>(annotationHelp);
+        if (annotationHelp != null) return annotationHelp;
 
         var callNode = NodeFinder.FindEnclosingCall(result.Hir, line, col);
-        if (callNode == null) return Task.FromResult<SignatureHelp?>(null);
+        if (callNode == null) return null;
 
         var calleeSym = SymID.Invalid;
         List<Expr> arguments;
@@ -46,17 +46,17 @@ public sealed class SignatureHelpHandler(NebraWorkspace workspace) : SignatureHe
                 }
                 break;
             default:
-                return Task.FromResult<SignatureHelp?>(null);
+                return null;
         }
 
         Symbol? sym = null;
         if (ft == null)
         {
             if (calleeSym == SymID.Invalid || !result.Syms.GetByID(calleeSym, out var s))
-                return Task.FromResult<SignatureHelp?>(null);
+                return null;
             sym = s;
             if (!result.Types.GetByID(sym.Type, out var typ) || typ is not FunctionType bound)
-                return Task.FromResult<SignatureHelp?>(null);
+                return null;
             ft = bound;
             calleeLabel = sym.Name;
         }
@@ -164,12 +164,12 @@ public sealed class SignatureHelpHandler(NebraWorkspace workspace) : SignatureHe
                 : null
         };
 
-        return Task.FromResult<SignatureHelp?>(new SignatureHelp
+        return new SignatureHelp
         {
             Signatures = new Container<SignatureInformation>(sigInfo),
             ActiveSignature = 0,
             ActiveParameter = Math.Min(activeParam, Math.Max(0, paramInfos.Count - 1))
-        });
+        };
     }
 
     /// <summary>

@@ -45,11 +45,11 @@ public sealed class SemanticTokensHandler(NebraWorkspace workspace) : SemanticTo
         };
     }
 
-    protected override Task Tokenize(SemanticTokensBuilder builder, ITextDocumentIdentifierParams request,
+    protected override async Task Tokenize(SemanticTokensBuilder builder, ITextDocumentIdentifierParams request,
         CancellationToken ct)
     {
-        var result = workspace.GetResult(request.TextDocument.Uri.ToString());
-        if (result == null) return Task.CompletedTask;
+        var result = await workspace.GetResultAsync(request.TextDocument.Uri.ToString(), ct);
+        if (result == null) return;
 
         var semanticOverrides = BuildSemanticOverrides(result);
 
@@ -80,7 +80,7 @@ public sealed class SemanticTokensHandler(NebraWorkspace workspace) : SemanticTo
             builder.Push(line, col, length, typeIndex, 0);
         }
 
-        return Task.CompletedTask;
+        return;
     }
 
     protected override Task<SemanticTokensDocument> GetSemanticTokensDocument(

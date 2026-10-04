@@ -9,17 +9,17 @@ namespace Nebra.LPS.Handlers;
 
 public sealed class DocumentSymbolHandler(NebraWorkspace workspace) : DocumentSymbolHandlerBase
 {
-    public override Task<SymbolInformationOrDocumentSymbolContainer?> Handle(
+    public override async Task<SymbolInformationOrDocumentSymbolContainer?> Handle(
         DocumentSymbolParams request, CancellationToken ct)
     {
-        var result = workspace.GetResult(request.TextDocument.Uri.ToString());
+        var result = await workspace.GetResultAsync(request.TextDocument.Uri.ToString(), ct);
         if (result == null)
-            return Task.FromResult<SymbolInformationOrDocumentSymbolContainer?>(null);
+            return null;
 
         var symbols = new List<SymbolInformationOrDocumentSymbol>();
         CollectSymbols(result.Hir.Body, symbols);
-        return Task.FromResult<SymbolInformationOrDocumentSymbolContainer?>(
-            new SymbolInformationOrDocumentSymbolContainer(symbols));
+        return 
+            new SymbolInformationOrDocumentSymbolContainer(symbols);
     }
 
     private void CollectSymbols(List<Stmt> stmts, List<SymbolInformationOrDocumentSymbol> symbols)

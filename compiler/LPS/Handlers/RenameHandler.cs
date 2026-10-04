@@ -9,30 +9,30 @@ namespace Nebra.LPS.Handlers;
 
 public sealed class RenameHandler(NebraWorkspace workspace) : RenameHandlerBase
 {
-    public override Task<WorkspaceEdit?> Handle(RenameParams request, CancellationToken ct)
+    public override async Task<WorkspaceEdit?> Handle(RenameParams request, CancellationToken ct)
     {
-        var result = workspace.GetResult(request.TextDocument.Uri.ToString());
-        if (result == null) return Task.FromResult<WorkspaceEdit?>(null);
+        var result = await workspace.GetResultAsync(request.TextDocument.Uri.ToString(), ct);
+        if (result == null) return null;
 
         var line = request.Position.Line + 1;
         var col = request.Position.Character + 1;
 
         var nameRef = NodeFinder.FindNameRef(result.Hir, line, col);
         if (nameRef == null || nameRef.Sym == SymID.Invalid)
-            return Task.FromResult<WorkspaceEdit?>(null);
+            return null;
 
         if (!result.Syms.GetByID(nameRef.Sym, out var sym))
-            return Task.FromResult<WorkspaceEdit?>(null);
+            return null;
 
         if (sym.DeclaringNode == NodeID.Invalid)
-            return Task.FromResult<WorkspaceEdit?>(null);
+            return null;
 
         var declaration = LocateDeclaration(result, nameRef, sym);
         if (declaration == null)
-            return Task.FromResult<WorkspaceEdit?>(null);
+            return null;
 
         var changes = new Dictionary<DocumentUri, IEnumerable<TextEdit>>();
-        foreach (var candidate in workspace.AnalyzeFilesMentioning(nameRef.Name))
+        foreach (var candidate in NebraWorkspace.FilesMentioning(result, nameRef.Name))
         {
             var edits = CollectEdits(candidate, declaration, nameRef.Name, request.NewName);
             if (edits.Count > 0)
@@ -40,9 +40,9 @@ public sealed class RenameHandler(NebraWorkspace workspace) : RenameHandlerBase
         }
 
         if (changes.Count == 0)
-            return Task.FromResult<WorkspaceEdit?>(null);
+            return null;
 
-        return Task.FromResult<WorkspaceEdit?>(new WorkspaceEdit { Changes = changes });
+        return new WorkspaceEdit { Changes = changes };
     }
 
     private sealed record DeclarationSite(string FilePath, TextSpan Span);

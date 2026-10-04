@@ -114,6 +114,13 @@ public sealed class Symbol(SymID id, SymbolKind kind, string name, ScopeID owner
     /// unannotated.
     /// </summary>
     public Side Side { get; set; } = Side.All;
+
+    /// <summary>
+    /// For a name brought in by an import, the symbol it originally comes from, followed through
+    /// re-exports; <see cref="SymID.Invalid"/> for every other symbol. Lets tooling relate an
+    /// imported name to its declaration across files.
+    /// </summary>
+    public SymID ImportedFrom { get; set; } = SymID.Invalid;
 }
 
 /// <summary>

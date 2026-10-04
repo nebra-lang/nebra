@@ -149,7 +149,7 @@ public sealed class NavigationTests
             references.Where(r => r != session.Location("decl")));
     }
 
-    [Fact(Skip = "#66: references are collected from the requesting file only")]
+    [Fact]
     public async Task ReferencesOfAnExportedFunctionSpanEveryImporter()
     {
         await using var session = await LspSession.StartAsync(

@@ -29,7 +29,7 @@ public sealed class LspSession : IAsyncDisposable
     /// prediction cache, which takes seconds. Paying it once up front keeps sessions that start
     /// in parallel from all doing so at the same time and running into the timeout.
     /// </summary>
-    private static readonly Task Warmup = Task.Run(WarmUpAnalysis);
+    private static readonly Task Warmup = Task.Run(WarmUpAnalysisAsync);
 
     private readonly Dictionary<string, MarkedSource> _files;
     private readonly DiagnosticsCollector _diagnostics;
@@ -169,6 +169,15 @@ public sealed class LspSession : IAsyncDisposable
     public Task<IReadOnlyList<Diagnostic>> NextDiagnostics(string path)
     {
         return _diagnostics.WaitForNext(Uri(path)).WaitAsync(DiagnosticsTimeout);
+    }
+
+    /// <summary>
+    /// The diagnostics the server has published for <paramref name="path"/>, waiting for the
+    /// first publication if there has been none - including for files that were never opened.
+    /// </summary>
+    public Task<IReadOnlyList<Diagnostic>> PublishedDiagnostics(string path)
+    {
+        return _diagnostics.WaitForAny(Uri(path)).WaitAsync(DiagnosticsTimeout);
     }
 
     /// <summary>
@@ -340,16 +349,15 @@ public sealed class LspSession : IAsyncDisposable
         return ValueTask.CompletedTask;
     }
 
-    private static void WarmUpAnalysis()
+    private static async Task WarmUpAnalysisAsync()
     {
         var root = Directory.CreateTempSubdirectory("nebra-lps-warmup-").FullName;
         WriteFile(root, "nebra.toml", DefaultConfig);
-        const string text = "local value: number = 1\nprint(value)\n";
-        WriteFile(root, "src/main.neb", text);
+        WriteFile(root, "src/main.neb", "local value: number = 1\nprint(value)\n");
 
         var workspace = new NebraWorkspace();
         workspace.Initialize(root);
-        workspace.AnalyzeDocument(DocumentUri.FromFileSystemPath(System.IO.Path.Combine(root, "src/main.neb")).ToString(), text);
+        await workspace.GetSnapshotAsync();
 
         Directory.Delete(root, true);
     }

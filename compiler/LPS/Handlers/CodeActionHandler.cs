@@ -17,12 +17,12 @@ namespace Nebra.LPS.Handlers;
 /// </summary>
 public sealed class CodeActionHandler(NebraWorkspace workspace) : CodeActionHandlerBase
 {
-    public override Task<CommandOrCodeActionContainer?> Handle(CodeActionParams request, CancellationToken ct)
+    public override async Task<CommandOrCodeActionContainer?> Handle(CodeActionParams request, CancellationToken ct)
     {
         var actions = new List<CommandOrCodeAction>();
 
         var uri = request.TextDocument.Uri.ToString();
-        var result = workspace.GetResult(uri);
+        var result = await workspace.GetResultAsync(uri, ct);
 
         if (result != null)
         {
@@ -42,7 +42,7 @@ public sealed class CodeActionHandler(NebraWorkspace workspace) : CodeActionHand
             }
         }));
 
-        return Task.FromResult<CommandOrCodeActionContainer?>(new CommandOrCodeActionContainer(actions));
+        return new CommandOrCodeActionContainer(actions);
     }
 
     public override Task<CodeAction> Handle(CodeAction request, CancellationToken ct)

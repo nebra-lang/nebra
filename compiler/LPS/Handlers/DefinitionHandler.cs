@@ -8,10 +8,10 @@ namespace Nebra.LPS.Handlers;
 
 public sealed class DefinitionHandler(NebraWorkspace workspace) : DefinitionHandlerBase
 {
-    public override Task<LocationOrLocationLinks?> Handle(DefinitionParams request, CancellationToken ct)
+    public override async Task<LocationOrLocationLinks?> Handle(DefinitionParams request, CancellationToken ct)
     {
-        var result = workspace.GetResult(request.TextDocument.Uri.ToString());
-        if (result == null) return Task.FromResult<LocationOrLocationLinks?>(null);
+        var result = await workspace.GetResultAsync(request.TextDocument.Uri.ToString(), ct);
+        if (result == null) return null;
 
         var line = request.Position.Line + 1;
         var col = request.Position.Character + 1;
@@ -25,18 +25,18 @@ public sealed class DefinitionHandler(NebraWorkspace workspace) : DefinitionHand
                 Range = new OmniSharp.Extensions.LanguageServer.Protocol.Models.Range(
                     new Position(0, 0), new Position(0, 0))
             };
-            return Task.FromResult<LocationOrLocationLinks?>(new LocationOrLocationLinks(location));
+            return new LocationOrLocationLinks(location);
         }
 
         var nameRef = NodeFinder.FindNameRef(result.Hir, line, col);
         if (nameRef == null)
-            return Task.FromResult<LocationOrLocationLinks?>(null);
+            return null;
 
         if (nameRef.Sym == SymID.Invalid)
-            return Task.FromResult(FindMemberDefinition(result, nameRef, line, col));
+            return FindMemberDefinition(result, nameRef, line, col);
 
         if (!result.Syms.GetByID(nameRef.Sym, out var sym))
-            return Task.FromResult<LocationOrLocationLinks?>(null);
+            return null;
 
         if (IsOnDeclaration(nameRef, sym, result))
         {
@@ -44,7 +44,7 @@ public sealed class DefinitionHandler(NebraWorkspace workspace) : DefinitionHand
             if (usages.Count > 0)
             {
                 var links = usages.Select(l => new LocationOrLocationLink(l)).ToList();
-                return Task.FromResult<LocationOrLocationLinks?>(new LocationOrLocationLinks(links));
+                return new LocationOrLocationLinks(links);
             }
         }
 
@@ -55,14 +55,14 @@ public sealed class DefinitionHandler(NebraWorkspace workspace) : DefinitionHand
                 Uri = DocumentUri.FromFileSystemPath(imported.FilePath),
                 Range = NebraWorkspace.SpanToRange(NodeFinder.DeclaredNameSpan(imported.DeclNode, sym.Name))
             };
-            return Task.FromResult<LocationOrLocationLinks?>(new LocationOrLocationLinks(loc));
+            return new LocationOrLocationLinks(loc);
         }
 
         if (sym.DeclaringNode == NodeID.Invalid)
-            return Task.FromResult<LocationOrLocationLinks?>(null);
+            return null;
 
         if (!result.NodeRegistry.TryGetValue(sym.DeclaringNode, out var declNode))
-            return Task.FromResult<LocationOrLocationLinks?>(null);
+            return null;
 
         var fileUri = result.Uri;
         if (result.FileMap.TryGetValue(sym.DeclaringNode, out var declFile))
@@ -74,7 +74,7 @@ public sealed class DefinitionHandler(NebraWorkspace workspace) : DefinitionHand
             Range = NebraWorkspace.SpanToRange(NodeFinder.DeclaredNameSpan(declNode, sym.Name))
         };
 
-        return Task.FromResult<LocationOrLocationLinks?>(new LocationOrLocationLinks(location2));
+        return new LocationOrLocationLinks(location2);
     }
 
     /// <summary>

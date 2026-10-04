@@ -105,6 +105,19 @@ public class NebraCompiler
     /// <returns>true if the compilation was successful, false otherwise.</returns>
     public Dictionary<string, object> Cache { get; } = new();
 
+    /// <summary>
+    /// Runs the analysis passes only - binding, name and type resolution and every check - without
+    /// generating code. For callers that want the diagnostics and the typed program, not the output.
+    /// </summary>
+    public bool Check()
+    {
+        var pm = new PassManager();
+        pm.BuildOrder(PassManager.CheckPipeline);
+
+        return pm.Run(Diagnostics, Packages.Values.ToList(), TypeUniverse, SymAlloc, ScopeAlloc, NodeAlloc, Names,
+            Cache, Config);
+    }
+
     public bool Compile()
     {
         var pm = new PassManager();

@@ -9,10 +9,10 @@ namespace Nebra.LPS.Handlers;
 
 public sealed class HoverHandler(NebraWorkspace workspace) : HoverHandlerBase
 {
-    public override Task<Hover?> Handle(HoverParams request, CancellationToken ct)
+    public override async Task<Hover?> Handle(HoverParams request, CancellationToken ct)
     {
-        var result = workspace.GetResult(request.TextDocument.Uri.ToString());
-        if (result == null) return Task.FromResult<Hover?>(null);
+        var result = await workspace.GetResultAsync(request.TextDocument.Uri.ToString(), ct);
+        if (result == null) return null;
 
         var line = request.Position.Line + 1;
         var col = request.Position.Character + 1;
@@ -114,7 +114,7 @@ public sealed class HoverHandler(NebraWorkspace workspace) : HoverHandlerBase
             if (!string.IsNullOrEmpty(docMarkdown))
                 hoverValue += $"\n\n---\n\n{docMarkdown}";
 
-            return Task.FromResult<Hover?>(new Hover
+            return new Hover
             {
                 Contents = new MarkedStringsOrMarkupContent(new MarkupContent
                 {
@@ -122,13 +122,13 @@ public sealed class HoverHandler(NebraWorkspace workspace) : HoverHandlerBase
                     Value = hoverValue
                 }),
                 Range = NebraWorkspace.SpanToRange(nameRef.Span)
-            });
+            };
         }
 
         if (nameRef != null && nameRef.Sym == SymID.Invalid)
         {
             var memberHover = TryMemberHover(result, hoveredNode, nameRef);
-            if (memberHover != null) return Task.FromResult<Hover?>(memberHover);
+            if (memberHover != null) return memberHover;
         }
 
         var annotation = FindAnnotationAt(result.Hir, line, col);
@@ -136,7 +136,7 @@ public sealed class HoverHandler(NebraWorkspace workspace) : HoverHandlerBase
         {
             var info = workspace.GetAnnotationInfo(annotation.Name.Name);
             var display = info ?? $"@{annotation.Name.Name}";
-            return Task.FromResult<Hover?>(new Hover
+            return new Hover
             {
                 Contents = new MarkedStringsOrMarkupContent(new MarkupContent
                 {
@@ -144,7 +144,7 @@ public sealed class HoverHandler(NebraWorkspace workspace) : HoverHandlerBase
                     Value = $"```nebra\n{display}\n```"
                 }),
                 Range = NebraWorkspace.SpanToRange(annotation.Span)
-            });
+            };
         }
 
         if (hoveredNode is Expr expr && expr.Type != TypID.Invalid)
@@ -153,7 +153,7 @@ public sealed class HoverHandler(NebraWorkspace workspace) : HoverHandlerBase
             var typesLine = workspace.FormatTypeReferencesLine(result, expr.Type);
             var value = $"```nebra\n{typeStr}\n```";
             if (!string.IsNullOrEmpty(typesLine)) value += $"\n\n{typesLine}";
-            return Task.FromResult<Hover?>(new Hover
+            return new Hover
             {
                 Contents = new MarkedStringsOrMarkupContent(new MarkupContent
                 {
@@ -161,10 +161,10 @@ public sealed class HoverHandler(NebraWorkspace workspace) : HoverHandlerBase
                     Value = value
                 }),
                 Range = NebraWorkspace.SpanToRange(expr.Span)
-            });
+            };
         }
 
-        return Task.FromResult<Hover?>(null);
+        return null;
     }
 
     /// <summary>

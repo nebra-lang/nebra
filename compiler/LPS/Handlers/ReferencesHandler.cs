@@ -8,42 +8,53 @@ namespace Nebra.LPS.Handlers;
 
 public sealed class ReferencesHandler(NebraWorkspace workspace) : ReferencesHandlerBase
 {
-    public override Task<LocationContainer?> Handle(ReferenceParams request, CancellationToken ct)
+    public override async Task<LocationContainer?> Handle(ReferenceParams request, CancellationToken ct)
     {
-        var result = workspace.GetResult(request.TextDocument.Uri.ToString());
-        if (result == null) return Task.FromResult<LocationContainer?>(null);
+        var result = await workspace.GetResultAsync(request.TextDocument.Uri.ToString(), ct);
+        if (result == null) return null;
 
         var line = request.Position.Line + 1;
         var col = request.Position.Character + 1;
 
         var nameRef = NodeFinder.FindNameRef(result.Hir, line, col);
         if (nameRef == null || nameRef.Sym == SymID.Invalid)
-            return Task.FromResult<LocationContainer?>(null);
+            return null;
 
-        var targetSym = nameRef.Sym;
-        var allRefs = NodeFinder.CollectAllNameRefs(result.Hir);
-        var locations = allRefs
-            .Where(nr => nr.Sym == targetSym)
-            .Select(nr => new Location
-            {
-                Uri = DocumentUri.Parse(result.Uri),
-                Range = NebraWorkspace.SpanToRange(nr.Span)
-            })
+        var usages = workspace.FindUsages(nameRef.Sym, result);
+        var declaration = FindDeclaration(result.Snapshot, nameRef.Sym);
+
+        var locations = usages
+            .Where(location => declaration == null || !SameLocation(location, declaration))
             .ToList();
 
-        if (request.Context.IncludeDeclaration &&
-            result.Syms.GetByID(targetSym, out var sym) &&
-            sym.DeclaringNode != NodeID.Invalid &&
-            result.NodeRegistry.TryGetValue(sym.DeclaringNode, out var declNode))
-        {
-            locations.Insert(0, new Location
-            {
-                Uri = DocumentUri.Parse(result.Uri),
-                Range = NebraWorkspace.SpanToRange(declNode.Span)
-            });
-        }
+        if (request.Context.IncludeDeclaration && declaration != null)
+            locations.Insert(0, declaration);
 
-        return Task.FromResult<LocationContainer?>(new LocationContainer(locations));
+        return new LocationContainer(locations);
+    }
+
+    /// <summary>
+    /// The location of the name that declares the symbol <paramref name="symId"/> stands for,
+    /// following an import back to the declaring file.
+    /// </summary>
+    private static Location? FindDeclaration(WorkspaceSnapshot snapshot, SymID symId)
+    {
+        if (!snapshot.TryGetSymbol(snapshot.Origin(symId), out var origin) || origin.DeclaringNode == NodeID.Invalid)
+            return null;
+
+        if (!snapshot.TryGetNode(origin.DeclaringNode, out var node, out var file))
+            return null;
+
+        return new Location
+        {
+            Uri = DocumentUri.Parse(snapshot.GetResult(file)?.Uri ?? DocumentUri.FromFileSystemPath(file).ToString()),
+            Range = NebraWorkspace.SpanToRange(NodeFinder.DeclaredNameSpan(node, origin.Name))
+        };
+    }
+
+    private static bool SameLocation(Location left, Location right)
+    {
+        return left.Uri == right.Uri && left.Range.Start == right.Range.Start;
     }
 
     protected override ReferenceRegistrationOptions CreateRegistrationOptions(

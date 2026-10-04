@@ -6,6 +6,7 @@ using Nebra.Compiler.Passes;
 using Nebra.Configuration;
 using Nebra.Diagnostics;
 using Nebra.IR;
+using Nebra.PackageManager;
 using OmniSharp.Extensions.LanguageServer.Protocol;
 using OmniSharp.Extensions.LanguageServer.Protocol.Document;
 using OmniSharp.Extensions.LanguageServer.Protocol.Models;
@@ -20,28 +21,37 @@ namespace Nebra.LPS;
 
 public sealed class NebraWorkspace
 {
-    private readonly ConcurrentDictionary<string, AnalysisResult> _results = new();
-    private readonly ConcurrentDictionary<string, string> _openDocuments = new();
+    /// <summary>
+    /// How long diagnostics wait for typing to pause before the workspace is recompiled for them.
+    /// Requests do not wait: they compile the latest state on demand.
+    /// </summary>
+    private static readonly TimeSpan DiagnosticsDelay = TimeSpan.FromMilliseconds(120);
+
+    private static readonly StringComparer PathComparer = StringComparer.OrdinalIgnoreCase;
+
+    private sealed record OpenDocument(string Uri, string Text);
+
+    private readonly ConcurrentDictionary<string, OpenDocument> _openDocuments = new(PathComparer);
+    private readonly ConcurrentDictionary<string, string> _lastParsed = new(PathComparer);
+    private readonly ConcurrentDictionary<string, byte> _touched = new(PathComparer);
+    private readonly Dictionary<string, string> _published = new(PathComparer);
+    private readonly SemaphoreSlim _buildGate = new(1, 1);
+    private readonly SemaphoreSlim _publishGate = new(1, 1);
+    private CancellationTokenSource? _pendingDiagnostics;
+    private WorkspaceSnapshot? _snapshot;
+    private long _version;
+
     private ILanguageServerFacade? _server;
     private Config _config = new();
 
     private string? _rootPath;
 
     /// <summary>
-    /// Cache for <see cref="AnalyzeImportedFile"/> keyed by absolute path.
-    /// Each entry stores the cache stamp (mtime + length for closed files,
-    /// or a content version for currently-open files) so we re-analyze only
-    /// when the file actually changes. Without this, every keystroke in a
-    /// consumer file re-parses every imported file from disk.
-    /// </summary>
-    private readonly ConcurrentDictionary<string, (string Stamp, AnalysisResult Result)> _importCache = new();
-
-    /// <summary>
     /// Cache for <see cref="ResolveImportPath"/>. Module resolution itself
     /// can do a recursive directory walk (looking for matching
     /// <c>declare module</c> headers), which is too expensive to repeat on
-    /// every keystroke. Keyed by <c>importerDir|moduleName</c>; invalidated
-    /// only when the workspace root changes (rare).
+    /// every keystroke. Keyed by <c>importerDir|moduleName</c>; cleared
+    /// whenever a document changes.
     /// </summary>
     private readonly ConcurrentDictionary<string, string?> _resolveCache = new();
 
@@ -53,402 +63,243 @@ public sealed class NebraWorkspace
             var configPath = Path.Combine(rootPath, "nebra.toml");
             var loaded = Config.LoadFromFile(configPath);
             if (loaded != null) _config = loaded;
+            else _config.ProjectRoot = Path.GetFullPath(rootPath);
         }
     }
 
     public void SetServer(ILanguageServerFacade server)
     {
         _server = server;
-        // Pre-warm the import cache so the first hover/symbol query in any
-        // workspace file doesn't pay the cold-parse cost. VSCode is supposed
-        // to send didOpen for already-open files once the dynamic
-        // registration completes, but in practice it sometimes drops them —
-        // pre-warming guarantees that GetResult's disk fallback hits a
-        // populated import cache and finishes fast.
-        if (_rootPath != null) Task.Run(() => PreWarmWorkspace(_rootPath));
-    }
-
-    private void PreWarmWorkspace(string rootPath)
-    {
-        try
-        {
-            var sourceRoot = Path.IsPathRooted(_config.Source)
-                ? _config.Source
-                : Path.Combine(rootPath, _config.Source);
-            if (!Directory.Exists(sourceRoot)) sourceRoot = rootPath;
-
-            string[] files;
-            try { files = Directory.GetFiles(sourceRoot, "*.neb", SearchOption.AllDirectories); }
-            catch { return; }
-
-            foreach (var f in files)
-            {
-                // Skip files that are also under common ignore directories
-                // ("out/", "nebra_modules/" generated bits): they're transient
-                // build artefacts and not worth indexing.
-                if (f.Contains("/out/") || f.Contains("/nebra_modules/")) continue;
-                try
-                {
-                    var cfg = _config.Clone();
-                    var dir = Path.GetDirectoryName(f);
-                    if (dir != null) cfg.Source = dir;
-                    AnalyzeImportedFile(f, cfg);
-                }
-                catch { /* best-effort warmup */ }
-            }
-        }
-        catch { /* best-effort warmup */ }
+        ScheduleDiagnostics();
     }
 
     /// <summary>
-    /// Returns the cached analysis for the given document URI, or — if the
-    /// document was never opened via <c>textDocument/didOpen</c> — falls back
-    /// to reading the file from disk and analyzing it on demand. The fallback
-    /// is necessary because VSCode sometimes drops the <c>didOpen</c>
-    /// notification for files that were already open when the language client
-    /// became ready (the dynamic-capability-registration race): without it,
-    /// every hover/symbol/definition request silently returns null until the
-    /// user types in the file.
+    /// Returns the snapshot reflecting every change received so far, compiling it if the latest
+    /// one is out of date. Concurrent callers share one compilation.
     /// </summary>
-    public AnalysisResult? GetResult(string uri)
+    public async Task<WorkspaceSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
-        if (_results.TryGetValue(uri, out var r)) return r;
+        var current = Volatile.Read(ref _snapshot);
+        if (current != null && current.Version == Interlocked.Read(ref _version))
+        {
+            return current;
+        }
 
-        var path = DocumentUri.GetFileSystemPath(DocumentUri.Parse(uri));
-        if (path == null || !File.Exists(path)) return null;
+        await _buildGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            current = Volatile.Read(ref _snapshot);
+            var version = Interlocked.Read(ref _version);
+            if (current != null && current.Version == version)
+            {
+                return current;
+            }
 
-        string text;
-        try { text = File.ReadAllText(path); }
-        catch { return null; }
-
-        AnalyzeDocument(uri, text);
-        return _results.TryGetValue(uri, out r) ? r : null;
+            var built = await Task.Run(() => BuildSnapshot(version), CancellationToken.None).ConfigureAwait(false);
+            Volatile.Write(ref _snapshot, built);
+            return built;
+        }
+        finally
+        {
+            _buildGate.Release();
+        }
     }
 
-    public void OnDocumentOpened(string uri, string text)
+    /// <summary>
+    /// The view of the document at <paramref name="uri"/> in the current snapshot, or null when it
+    /// is not part of the compilation.
+    /// </summary>
+    public async Task<AnalysisResult?> GetResultAsync(string uri, CancellationToken cancellationToken = default)
     {
-        _openDocuments[uri] = text;
-        InvalidateImportCacheFor(uri);
-        AnalyzeDocument(uri, text);
+        var path = PathOf(uri);
+        if (path == null) return null;
+
+        var snapshot = await GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        return snapshot.GetResult(path);
     }
 
-    public void OnDocumentChanged(string uri, string text)
-    {
-        _openDocuments[uri] = text;
-        InvalidateImportCacheFor(uri);
-        AnalyzeDocument(uri, text);
-        ReanalyzeImporters(uri);
-    }
+    public void OnDocumentOpened(string uri, string text) => UpdateDocument(uri, text);
+
+    public void OnDocumentChanged(string uri, string text) => UpdateDocument(uri, text);
 
     public void OnDocumentClosed(string uri)
     {
-        _openDocuments.TryRemove(uri, out _);
-        _results.TryRemove(uri, out _);
-        InvalidateImportCacheFor(uri);
-        _server?.TextDocument.PublishDiagnostics(new PublishDiagnosticsParams
-        {
-            Uri = DocumentUri.Parse(uri),
-            Diagnostics = new Container<LspDiagnostic>()
-        });
+        var path = PathOf(uri);
+        if (path == null) return;
+
+        _openDocuments.TryRemove(path, out _);
+        Invalidate(path);
     }
 
-    /// <summary>
-    /// Drops any cached import analysis pointing at <paramref name="uri"/>'s
-    /// path so consumers re-analyze the freshly edited content next time
-    /// they're checked. Required for both open/change/close so we never
-    /// serve stale type info from a previously cached version.
-    /// </summary>
-    private void InvalidateImportCacheFor(string uri)
+    private void UpdateDocument(string uri, string text)
+    {
+        var path = PathOf(uri);
+        if (path == null) return;
+
+        _openDocuments[path] = new OpenDocument(uri, text);
+        Invalidate(path);
+    }
+
+    private void Invalidate(string path)
+    {
+        Interlocked.Increment(ref _version);
+        _resolveCache.Clear();
+        _touched[path] = 0;
+        ScheduleDiagnostics();
+    }
+
+    private static string? PathOf(string uri)
     {
         var path = DocumentUri.GetFileSystemPath(DocumentUri.Parse(uri));
-        if (path == null) return;
-        var full = Path.GetFullPath(path);
-        _importCache.TryRemove(full, out _);
-
-        // Path resolution can reach into recursive directory walks (the
-        // `declare module "X"` lookup), so a newly-created file might make a
-        // previously-unresolved import suddenly resolvable. Cheapest fix:
-        // drop the whole resolve cache whenever a document state changes —
-        // re-resolving on a hot import cache is fast.
-        _resolveCache.Clear();
+        return path == null ? null : Path.GetFullPath(path);
     }
 
-    public void AnalyzeDocument(string uri, string sourceText)
+    private WorkspaceSnapshot BuildSnapshot(long version)
     {
-        var (analysed, diagnostics, path) = BuildAnalysis(uri, sourceText);
-        if (analysed != null) _results[uri] = analysed;
-        PublishDiagnostics(uri, path, diagnostics);
+        var config = _config.Clone();
+        var documents = new Dictionary<string, SourceDocument>(PathComparer);
+
+        foreach (var path in EnumerateProjectSources(config))
+        {
+            documents[path] = new SourceDocument(path, File.ReadAllText(path));
+        }
+
+        foreach (var (path, open) in _openDocuments)
+        {
+            if (!IsCompiledAsSource(path, config) && documents.Count > 0 && !IsOutsideProject(path)) continue;
+            documents[path] = new SourceDocument(path, open.Text, open.Uri);
+        }
+
+        var snapshot = WorkspaceSnapshot.Build(version, config, documents.Values.ToList(), _lastParsed);
+
+        foreach (var (path, document) in documents)
+        {
+            if (!snapshot.IsStale(path) && snapshot.GetResult(path) != null)
+            {
+                _lastParsed[path] = document.Text;
+            }
+        }
+
+        if (snapshot.Failure != null)
+        {
+            _server?.Window.LogError($"nebra: analysis stopped early: {snapshot.Failure}");
+        }
+
+        return snapshot;
     }
 
     /// <summary>
-    /// Runs the analysis for a document without caching the result or publishing its diagnostics.
-    /// Used for files a request has to reach into (a workspace-wide rename, say) that the user has
-    /// never opened, so they do not gain diagnostics or evict an open document's cached result.
+    /// The project's own source files, exactly the set <c>nebra build</c> compiles: every
+    /// <c>.neb</c> file under the source directory, declaration files only for a types-only
+    /// project, and nothing inside <c>nebra_modules/</c> or the output directory.
     /// </summary>
-    private (AnalysisResult? Result, DiagnosticsBag Diagnostics, string FilePath) BuildAnalysis(
-        string uri, string sourceText)
+    private IEnumerable<string> EnumerateProjectSources(Config config)
     {
-        var filePath = DocumentUri.GetFileSystemPath(DocumentUri.Parse(uri)) ?? uri;
-        var fileDir = Path.GetDirectoryName(Path.GetFullPath(filePath));
+        if (_rootPath == null) yield break;
 
-        var diag = new DiagnosticsBag();
-        var nodeAlloc = new IDAlloc<NodeID>();
-        var symAlloc = new IDAlloc<SymID>();
-        var scopeAlloc = new IDAlloc<ScopeID>();
-        var types = new TypeTable(new IDAlloc<TypID>());
-        var names = new NameMap();
+        var sourceRoot = Path.GetFullPath(Path.Combine(config.ProjectRoot, config.Source));
+        if (!Directory.Exists(sourceRoot)) yield break;
 
-        var effectiveConfig = _config.Clone();
-        if (fileDir != null)
-            effectiveConfig.Source = fileDir;
-
-        CommonTokenStream tokenStream;
-        IRScript? hir;
-        try
+        foreach (var file in InstalledPackages.EnumerateFilesSafely(sourceRoot, "*.neb"))
         {
-            var inputStream = new AntlrInputStream(sourceText);
-            var lexer = new NebraLexer(inputStream);
-            lexer.RemoveErrorListeners();
-            lexer.AddErrorListener(new DiagnosticsSymbolErrorListener(diag, filePath));
-            tokenStream = new CommonTokenStream(lexer);
-            var parser = new NebraParser(tokenStream);
-            parser.RemoveErrorListeners();
-            parser.AddErrorListener(new DiagnosticsTokenErrorListener(diag, filePath));
-            var visitor = new IRVisitor(filePath, nodeAlloc, diag, effectiveConfig);
-            var ir = visitor.Visit(parser.script());
-            hir = ir as IRScript;
+            var full = Path.GetFullPath(file);
+            if (IsCompiledAsSource(full, config) && !IsBuildOutput(full, config))
+            {
+                yield return full;
+            }
         }
-        catch
-        {
-            return (null, diag, filePath);
-        }
-
-        if (hir == null)
-        {
-            return (null, diag, filePath);
-        }
-
-        var scopes = new ScopeGraph(diag, scopeAlloc);
-        var pkg = new PackageContext(filePath, new SymbolArena(symAlloc), scopes, types, scopes.Root);
-        var file = new PreparsedFile(filePath, sourceText) { Hir = hir };
-        pkg.Files.Add(file);
-        Nebra.Doc.DocBinder.Bind(hir, sourceText);
-
-        var cache = new Dictionary<string, object>();
-
-        try
-        {
-            var pm1 = new PassManager();
-            pm1.BuildOrder(PassManager.SingleFilePhase1);
-            pm1.Run(diag, [pkg], types, symAlloc, scopeAlloc, nodeAlloc, names, cache, effectiveConfig);
-        }
-        catch
-        {
-        }
-
-        var (importedFiles, importedDecls) = PostResolveImports(hir, filePath, pkg, types, diag, effectiveConfig);
-
-        try
-        {
-            var pm2 = new PassManager();
-            pm2.BuildOrder(PassManager.SingleFilePhase2);
-            pm2.Run(diag, [pkg], types, symAlloc, scopeAlloc, nodeAlloc, names, cache, effectiveConfig);
-        }
-        catch
-        {
-        }
-
-        ValidateAnnotations(hir, diag);
-
-        var nodeRegistry = NodeFinder.BuildNodeRegistry(hir);
-        var fileMap = new Dictionary<NodeID, string>();
-        foreach (var (id, _) in nodeRegistry)
-            fileMap.TryAdd(id, filePath);
-
-        var result = new AnalysisResult
-        {
-            Uri = uri,
-            FilePath = filePath,
-            SourceText = sourceText,
-            File = file,
-            Package = pkg,
-            Diagnostics = diag,
-            TokenStream = tokenStream,
-            NodeRegistry = nodeRegistry,
-            FileMap = fileMap,
-            ImportedDeclarations = importedDecls
-        };
-
-        return (result, diag, filePath);
     }
 
-    private (List<PreparsedFile> Files, Dictionary<SymID, ImportedDecl> Decls) PostResolveImports(
-        IRScript hir, string importerPath,
-        PackageContext pkg, TypeTable types, DiagnosticsBag diag, Config effectiveConfig)
+    private static bool IsCompiledAsSource(string path, Config config)
     {
-        var importedFiles = new List<PreparsedFile>();
-        var importedDecls = new Dictionary<SymID, ImportedDecl>();
-
-        foreach (var stmt in hir.Body)
-        {
-            if (stmt is not ImportStmt import) continue;
-
-            var moduleName = import.Module.Name;
-            if (moduleName.EndsWith(".neb"))
-                moduleName = moduleName[..^4];
-
-            var resolvedPath = ResolveImportPath(moduleName, importerPath);
-
-            if (resolvedPath == null)
-            {
-                diag.Report(import.Module.Span, NebraDiagnosticCode.ErrModuleNotFound, moduleName);
-                continue;
-            }
-
-            var importAnalysis = AnalyzeImportedFile(resolvedPath, effectiveConfig);
-            if (importAnalysis == null) continue;
-
-            importedFiles.Add(importAnalysis.File);
-
-            var exports = CollectExports(importAnalysis, moduleName);
-            var allTopLevel = CollectAllTopLevel(importAnalysis, moduleName);
-
-            switch (import.Kind)
-            {
-                case ImportKind.Named:
-                    foreach (var spec in import.Specifiers)
-                    {
-                        var memberName = spec.Name.Name;
-                        if (exports.TryGetValue(memberName, out var exportInfo))
-                        {
-                            var importName = spec.Alias ?? spec.Name;
-                            var symId = SetImportedType(pkg, types, importName.Name, exportInfo);
-                            if (symId != SymID.Invalid && exportInfo.DeclNode != null)
-                                importedDecls[symId] = new ImportedDecl(resolvedPath, exportInfo.DeclNode.Span, exportInfo.DeclNode);
-                        }
-                        else if (allTopLevel.ContainsKey(memberName))
-                        {
-                            diag.Report(spec.Name.Span, NebraDiagnosticCode.ErrSymbolNotExported, memberName, moduleName);
-                        }
-                        else
-                        {
-                            diag.Report(spec.Name.Span, NebraDiagnosticCode.ErrSymbolNotFound, memberName, moduleName);
-                        }
-                    }
-                    break;
-
-                case ImportKind.Namespace:
-                    if (import.Alias != null)
-                    {
-                        var fields = exports.Select(kvp =>
-                        {
-                            var fieldType = ImportType(types, kvp.Value.Type, importAnalysis.Types);
-                            return new StructType.Field(
-                                new NameRef(kvp.Key, TextSpan.Empty), fieldType);
-                        });
-                        var structType = new StructType(fields);
-                        var declared = types.DeclareType(structType);
-                        SetImportedSymbolType(pkg, import.Alias.Name, declared.ID);
-                    }
-                    break;
-            }
-        }
-
-        return (importedFiles, importedDecls);
+        return config.TypesOnly || !path.EndsWith(".d.neb", StringComparison.OrdinalIgnoreCase);
     }
 
-    private AnalysisResult? AnalyzeImportedFile(string filePath, Config baseConfig)
+    private static bool IsBuildOutput(string path, Config config)
     {
-        var fullPath = Path.GetFullPath(filePath);
+        var output = Path.GetFullPath(Path.Combine(config.ProjectRoot, config.Output)) + Path.DirectorySeparatorChar;
+        return path.StartsWith(output, StringComparison.OrdinalIgnoreCase);
+    }
 
-        string source;
-        var openDoc = _openDocuments.FirstOrDefault(kv =>
-        {
-            var docPath = DocumentUri.GetFileSystemPath(DocumentUri.Parse(kv.Key));
-            return docPath != null && string.Equals(Path.GetFullPath(docPath), fullPath,
-                StringComparison.OrdinalIgnoreCase);
-        });
+    private bool IsOutsideProject(string path)
+    {
+        if (_rootPath == null) return true;
+        var root = Path.GetFullPath(_rootPath) + Path.DirectorySeparatorChar;
+        return !path.StartsWith(root, StringComparison.OrdinalIgnoreCase);
+    }
 
-        string stamp;
-        if (openDoc.Value != null)
+    /// <summary>
+    /// Publishes diagnostics once edits have paused for <see cref="DiagnosticsDelay"/>; a newer
+    /// edit cancels the wait so a burst of keystrokes compiles once.
+    /// </summary>
+    private void ScheduleDiagnostics()
+    {
+        var pending = new CancellationTokenSource();
+        Interlocked.Exchange(ref _pendingDiagnostics, pending)?.Cancel();
+        _ = PublishAfterDelayAsync(pending.Token);
+    }
+
+    private async Task PublishAfterDelayAsync(CancellationToken cancellationToken)
+    {
+        try
         {
-            source = openDoc.Value;
-            // Open-document hash so cache invalidates as the user types.
-            stamp = "open:" + source.Length + ":" + source.GetHashCode();
+            await Task.Delay(DiagnosticsDelay, cancellationToken).ConfigureAwait(false);
+            var snapshot = await GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            await PublishDiagnosticsAsync(snapshot, cancellationToken).ConfigureAwait(false);
         }
-        else
+        catch (OperationCanceledException)
         {
-            try
+        }
+        catch (Exception exception)
+        {
+            _server?.Window.LogError($"nebra: publishing diagnostics failed: {exception}");
+        }
+    }
+
+    /// <summary>
+    /// Sends diagnostics for every source file and open document whose diagnostics changed, and
+    /// for every document edited since the last round even if they did not, since an editor
+    /// waits for a response to its own change. Files that dropped out of the workspace are cleared.
+    /// </summary>
+    private async Task PublishDiagnosticsAsync(WorkspaceSnapshot snapshot, CancellationToken cancellationToken)
+    {
+        if (_server == null) return;
+
+        await _publishGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var touched = _touched.Keys.ToList();
+            foreach (var path in touched) _touched.TryRemove(path, out _);
+
+            var paths = new HashSet<string>(snapshot.SourcePaths, PathComparer);
+            paths.UnionWith(_openDocuments.Keys);
+            paths.UnionWith(_published.Keys);
+            paths.UnionWith(touched);
+
+            foreach (var path in paths)
             {
-                var fi = new FileInfo(filePath);
-                stamp = $"file:{fi.LastWriteTimeUtc.Ticks}:{fi.Length}";
-                source = File.ReadAllText(filePath);
+                var inWorkspace = snapshot.SourcePaths.Contains(path, PathComparer) || _openDocuments.ContainsKey(path);
+                var diagnostics = inWorkspace ? snapshot.DiagnosticsFor(path).Select(ToLspDiagnostic).ToList() : [];
+                var fingerprint = string.Join("\n", diagnostics.Select(d => $"{d.Range}|{d.Code}|{d.Message}"));
+
+                var changed = !_published.TryGetValue(path, out var previous) || previous != fingerprint;
+                if (!changed && !touched.Contains(path, PathComparer)) continue;
+
+                if (inWorkspace) _published[path] = fingerprint;
+                else _published.Remove(path);
+
+                var uri = _openDocuments.TryGetValue(path, out var open) ? open.Uri : DocumentUri.FromFileSystemPath(path).ToString();
+                _server.TextDocument.PublishDiagnostics(new PublishDiagnosticsParams
+                {
+                    Uri = DocumentUri.Parse(uri),
+                    Diagnostics = new Container<LspDiagnostic>(diagnostics)
+                });
             }
-            catch { return null; }
         }
-
-        if (_importCache.TryGetValue(fullPath, out var cached) && cached.Stamp == stamp)
-            return cached.Result;
-
-        var diag = new DiagnosticsBag();
-        var nodeAlloc = new IDAlloc<NodeID>();
-        var symAlloc = new IDAlloc<SymID>();
-        var scopeAlloc = new IDAlloc<ScopeID>();
-        var typesLocal = new TypeTable(new IDAlloc<TypID>());
-        var names = new NameMap();
-
-        var config = baseConfig.Clone();
-        var fileDir = Path.GetDirectoryName(Path.GetFullPath(filePath));
-        if (fileDir != null) config.Source = fileDir;
-
-        IRScript? hir;
-        CommonTokenStream tokenStream;
-        try
+        finally
         {
-            var inputStream = new AntlrInputStream(source);
-            var lexer = new NebraLexer(inputStream);
-            lexer.RemoveErrorListeners();
-            tokenStream = new CommonTokenStream(lexer);
-            var parser = new NebraParser(tokenStream);
-            parser.RemoveErrorListeners();
-            var visitor = new IRVisitor(filePath, nodeAlloc, diag, config);
-            hir = visitor.Visit(parser.script()) as IRScript;
+            _publishGate.Release();
         }
-        catch { return null; }
-
-        if (hir == null) return null;
-
-        var scopes = new ScopeGraph(diag, scopeAlloc);
-        var pkg = new PackageContext(filePath, new SymbolArena(symAlloc), scopes, typesLocal, scopes.Root);
-        var file = new PreparsedFile(filePath, source) { Hir = hir };
-        pkg.Files.Add(file);
-        Nebra.Doc.DocBinder.Bind(hir, source);
-
-        try
-        {
-            var pm = new PassManager();
-            pm.BuildOrder(PassManager.SingleFilePipeline);
-            pm.Run(diag, [pkg], typesLocal, symAlloc, scopeAlloc, nodeAlloc, names, new Dictionary<string, object>(), config);
-        }
-        catch { }
-
-        var nodeRegistry = NodeFinder.BuildNodeRegistry(hir);
-
-        var result = new AnalysisResult
-        {
-            Uri = DocumentUri.FromFileSystemPath(filePath).ToString(),
-            FilePath = filePath,
-            SourceText = source,
-            File = file,
-            Package = pkg,
-            Diagnostics = diag,
-            TokenStream = tokenStream,
-            NodeRegistry = nodeRegistry,
-            FileMap = nodeRegistry.ToDictionary(kv => kv.Key, _ => filePath)
-        };
-
-        _importCache[fullPath] = (stamp, result);
-        return result;
     }
 
     public record struct ExportInfo(IR.Type Type, IR.SymbolKind SymKind, SymID Sym, Node? DeclNode);
@@ -529,27 +380,6 @@ public sealed class NebraWorkspace
         }
     }
 
-    private static Dictionary<string, SymID> CollectAllTopLevel(AnalysisResult result, string? targetModuleName = null)
-    {
-        var all = new Dictionary<string, SymID>();
-        foreach (var stmt in result.Hir.Body)
-        {
-            foreach (var (name, sym) in GetDeclaredNames(stmt))
-                all.TryAdd(name, sym);
-            if (stmt is ExportStmt exp)
-                foreach (var (name, sym) in GetDeclaredNames(exp.Declaration))
-                    all.TryAdd(name, sym);
-            if (stmt is DeclareModuleDecl dmd
-                && (targetModuleName == null || dmd.ModuleName.Name == targetModuleName))
-            {
-                foreach (var member in dmd.Members)
-                    foreach (var (name, sym) in GetDeclareMemberNames(member))
-                        all.TryAdd(name, sym);
-            }
-        }
-        return all;
-    }
-
     private static List<(string Name, SymID Sym)> GetDeclaredNames(Stmt stmt)
     {
         return stmt switch
@@ -575,217 +405,6 @@ public sealed class NebraWorkspace
             InterfaceDecl idecl => [(idecl.Name.Name, idecl.Name.Sym)],
             _ => []
         };
-    }
-
-    private SymID SetImportedType(PackageContext pkg, TypeTable types, string name, ExportInfo exportInfo)
-    {
-        var importedType = ImportType(types, exportInfo.Type, null);
-        if (pkg.Scopes.Lookup(pkg.Root, name, out var symId) && pkg.Syms.GetByID(symId, out var sym))
-        {
-            sym.Type = importedType.ID;
-            return symId;
-        }
-        return SymID.Invalid;
-    }
-
-    private static void SetImportedSymbolType(PackageContext pkg, string name, TypID typeId)
-    {
-        if (pkg.Scopes.Lookup(pkg.Root, name, out var symId) && pkg.Syms.GetByID(symId, out var sym))
-        {
-            sym.Type = typeId;
-        }
-    }
-
-    /// <summary>
-    /// Bridges a type from a different <see cref="TypeTable"/> into
-    /// <paramref name="dstTypes"/>. Classes and interfaces need their members
-    /// copied across explicitly; without this, hovering on
-    /// <c>obj:method()</c> where <c>obj</c> comes from an imported class
-    /// reads an empty <see cref="ClassType.Methods"/> and falls through to
-    /// <c>any</c>. The walk is memoised so cyclic class graphs (A.method
-    /// returns B which references A) terminate.
-    /// </summary>
-    private static IR.Type ImportType(TypeTable dstTypes, IR.Type srcType, TypeTable? srcTypes,
-        Dictionary<IR.Type, IR.Type>? memo = null)
-    {
-        memo ??= new Dictionary<IR.Type, IR.Type>(ReferenceEqualityComparer.Instance);
-        if (memo.TryGetValue(srcType, out var existing)) return existing;
-
-        switch (srcType)
-        {
-            case FunctionType ft:
-            {
-                var imported = dstTypes.DeclareType(new FunctionType(
-                    ft.ParamTypes.Select(p => ImportType(dstTypes, p, srcTypes, memo)),
-                    ft.ParamNames,
-                    ImportType(dstTypes, ft.ReturnType, srcTypes, memo),
-                    ft.IsVararg,
-                    ft.VarargType != null ? ImportType(dstTypes, ft.VarargType, srcTypes, memo) : null,
-                    ft.DefaultParams.Count > 0 ? [..ft.DefaultParams] : null));
-                memo[srcType] = imported;
-                return imported;
-            }
-            case UnionType ut:
-            {
-                var imported = dstTypes.DeclareType(new UnionType(
-                    ut.Types.Select(t => ImportType(dstTypes, t, srcTypes, memo))));
-                memo[srcType] = imported;
-                return imported;
-            }
-            case TableArrayType ta:
-            {
-                var imported = dstTypes.DeclareType(new TableArrayType(
-                    ImportType(dstTypes, ta.ElementType, srcTypes, memo)));
-                memo[srcType] = imported;
-                return imported;
-            }
-            case TableMapType tm:
-            {
-                var imported = dstTypes.DeclareType(new TableMapType(
-                    ImportType(dstTypes, tm.KeyType, srcTypes, memo),
-                    ImportType(dstTypes, tm.ValueType, srcTypes, memo)));
-                memo[srcType] = imported;
-                return imported;
-            }
-            case StructType st:
-            {
-                var imported = dstTypes.DeclareType(new StructType(
-                    st.Fields.Select(f => new StructType.Field(f.Name, ImportType(dstTypes, f.Type, srcTypes, memo), f.IsMeta))));
-                memo[srcType] = imported;
-                return imported;
-            }
-            case TupleType tt:
-            {
-                var imported = dstTypes.DeclareType(new TupleType(
-                    tt.Fields.Select(f => new TupleType.Field(f.Name, ImportType(dstTypes, f.Type, srcTypes, memo)))));
-                memo[srcType] = imported;
-                return imported;
-            }
-            case EnumType et:
-            {
-                var imported = dstTypes.DeclareType(new EnumType(
-                    et.Name, et.Members, ImportType(dstTypes, et.BaseType, srcTypes, memo)));
-                memo[srcType] = imported;
-                return imported;
-            }
-            case ClassType ct:
-            {
-                // Pre-register the bridge in memo BEFORE recursing into
-                // members so a method whose signature references the same
-                // class doesn't loop and doesn't get a half-built second
-                // copy.
-                var bridge = new ClassType(ct.Name, null, [], ct.IsAbstract);
-                var declared = dstTypes.DeclareType(bridge);
-                memo[srcType] = declared;
-                // Re-fetch in case DeclareType deduplicated to an existing
-                // entry — its Methods dict may already be populated.
-                if (declared is not ClassType target) return declared;
-                if (target.Methods.Count > 0) return declared;
-
-                target.BaseClass = ct.BaseClass != null
-                    ? ImportType(dstTypes, ct.BaseClass, srcTypes, memo) as ClassType
-                    : null;
-                foreach (var iface in ct.Interfaces)
-                {
-                    if (ImportType(dstTypes, iface, srcTypes, memo) is InterfaceType bridged)
-                        target.Interfaces.Add(bridged);
-                }
-                foreach (var (n, f) in ct.InstanceFields)
-                    target.InstanceFields[n] = new StructType.Field(f.Name,
-                        ImportType(dstTypes, f.Type, srcTypes, memo), f.IsMeta);
-                foreach (var (n, m) in ct.Methods)
-                    if (ImportType(dstTypes, m, srcTypes, memo) is FunctionType bm) target.Methods[n] = bm;
-                foreach (var (n, declaration) in ct.MemberDeclarations)
-                    target.MemberDeclarations[n] = declaration;
-                foreach (var (n, m) in ct.StaticMethods)
-                    if (ImportType(dstTypes, m, srcTypes, memo) is FunctionType bm) target.StaticMethods[n] = bm;
-                foreach (var (n, list) in ct.MethodOverloads)
-                {
-                    var bridgedList = new List<FunctionType>();
-                    foreach (var fn in list)
-                        if (ImportType(dstTypes, fn, srcTypes, memo) is FunctionType bfn) bridgedList.Add(bfn);
-                    target.MethodOverloads[n] = bridgedList;
-                }
-                foreach (var (n, list) in ct.StaticMethodOverloads)
-                {
-                    var bridgedList = new List<FunctionType>();
-                    foreach (var fn in list)
-                        if (ImportType(dstTypes, fn, srcTypes, memo) is FunctionType bfn) bridgedList.Add(bfn);
-                    target.StaticMethodOverloads[n] = bridgedList;
-                }
-                foreach (var (n, list) in ct.MethodOverloadSides) target.MethodOverloadSides[n] = [..list];
-                foreach (var (n, list) in ct.StaticMethodOverloadSides) target.StaticMethodOverloadSides[n] = [..list];
-                foreach (var (n, g) in ct.Getters)
-                    if (ImportType(dstTypes, g, srcTypes, memo) is FunctionType bg) target.Getters[n] = bg;
-                foreach (var (n, s) in ct.Setters)
-                    if (ImportType(dstTypes, s, srcTypes, memo) is FunctionType bs) target.Setters[n] = bs;
-                if (ct.ConstructorType != null)
-                    target.ConstructorType = ImportType(dstTypes, ct.ConstructorType, srcTypes, memo) as FunctionType;
-                foreach (var n in ct.AbstractMethods) target.AbstractMethods.Add(n);
-                foreach (var n in ct.ProtectedMembers) target.ProtectedMembers.Add(n);
-                target.CtorTemplate = ct.CtorTemplate;
-                target.ConstructorSide = ct.ConstructorSide;
-                foreach (var (n, s) in ct.FieldSides) target.FieldSides[n] = s;
-                foreach (var (n, s) in ct.MethodSides) target.MethodSides[n] = s;
-                foreach (var (n, s) in ct.StaticMethodSides) target.StaticMethodSides[n] = s;
-                foreach (var (n, s) in ct.GetterSides) target.GetterSides[n] = s;
-                foreach (var (n, s) in ct.SetterSides) target.SetterSides[n] = s;
-                return declared;
-            }
-            case InterfaceType it:
-            {
-                var bridge = new InterfaceType(it.Name, []);
-                var declared = dstTypes.DeclareType(bridge);
-                memo[srcType] = declared;
-                if (declared is not InterfaceType target) return declared;
-                if (target.Methods.Count > 0) return declared;
-
-                foreach (var b in it.BaseInterfaces)
-                    if (ImportType(dstTypes, b, srcTypes, memo) is InterfaceType bb) target.BaseInterfaces.Add(bb);
-                foreach (var (n, f) in it.Fields)
-                    target.Fields[n] = new StructType.Field(f.Name,
-                        ImportType(dstTypes, f.Type, srcTypes, memo), f.IsMeta);
-                foreach (var (n, m) in it.Methods)
-                    if (ImportType(dstTypes, m, srcTypes, memo) is FunctionType bm) target.Methods[n] = bm;
-                foreach (var (n, declaration) in it.MemberDeclarations)
-                    target.MemberDeclarations[n] = declaration;
-                foreach (var (n, list) in it.MethodOverloads)
-                {
-                    var bridgedList = new List<FunctionType>();
-                    foreach (var fn in list)
-                        if (ImportType(dstTypes, fn, srcTypes, memo) is FunctionType bfn) bridgedList.Add(bfn);
-                    target.MethodOverloads[n] = bridgedList;
-                }
-                foreach (var (n, list) in it.MethodOverloadSides) target.MethodOverloadSides[n] = [..list];
-                foreach (var (n, s) in it.FieldSides) target.FieldSides[n] = s;
-                foreach (var (n, s) in it.MethodSides) target.MethodSides[n] = s;
-                return declared;
-            }
-            default:
-            {
-                var imported = dstTypes.DeclareType(new IR.Type(srcType.Kind));
-                memo[srcType] = imported;
-                return imported;
-            }
-        }
-    }
-
-    private void PublishDiagnostics(string uri, string filePath, DiagnosticsBag bag)
-    {
-        var fullPath = Path.GetFullPath(filePath);
-        var lspDiags = bag.Diagnostics
-            .Where(d => d.Span != TextSpan.Empty)
-            .Where(d => d.Span.File == null ||
-                        string.Equals(Path.GetFullPath(d.Span.File), fullPath,
-                            StringComparison.OrdinalIgnoreCase))
-            .Select(ToLspDiagnostic)
-            .ToList();
-
-        _server?.TextDocument.PublishDiagnostics(new PublishDiagnosticsParams
-        {
-            Uri = DocumentUri.Parse(uri),
-            Diagnostics = new Container<LspDiagnostic>(lspDiags)
-        });
     }
 
     private static LspDiagnostic ToLspDiagnostic(NebraDiagnostic d)
@@ -1106,7 +725,7 @@ public sealed class NebraWorkspace
             }
         }
 
-        foreach (var (_, other) in _results)
+        foreach (var other in result.Snapshot.SourceResults())
         {
             var found = FindTypeDeclInScript(other.Hir, typeName, other.FilePath);
             if (found != null) return found;
@@ -1229,20 +848,25 @@ public sealed class NebraWorkspace
         return new TypeDeclLocation(filePath, span);
     }
 
+    /// <summary>
+    /// Every use of the symbol <paramref name="targetSym"/> across the workspace, including uses
+    /// in other files through an import of it.
+    /// </summary>
     public List<Location> FindUsages(SymID targetSym, AnalysisResult originResult)
     {
+        var snapshot = originResult.Snapshot;
+        var origin = snapshot.Origin(targetSym);
         var locations = new List<Location>();
 
-        foreach (var (uri, res) in _results)
+        foreach (var other in snapshot.SourceResults())
         {
-            var allRefs = NodeFinder.CollectAllNameRefs(res.Hir);
-            foreach (var nr in allRefs)
+            foreach (var nameRef in NodeFinder.CollectAllNameRefs(other.Hir))
             {
-                if (nr.Sym != targetSym) continue;
+                if (nameRef.Sym == SymID.Invalid || snapshot.Origin(nameRef.Sym) != origin) continue;
                 locations.Add(new Location
                 {
-                    Uri = DocumentUri.Parse(uri),
-                    Range = SpanToRange(nr.Span)
+                    Uri = DocumentUri.Parse(other.Uri),
+                    Range = SpanToRange(nameRef.Span)
                 });
             }
         }
@@ -1257,10 +881,7 @@ public sealed class NebraWorkspace
         var resolvedPath = ResolveImportPath(moduleName, result.FilePath);
         if (resolvedPath == null) return null;
 
-        var dir = Path.GetDirectoryName(result.FilePath);
-        var effectiveConfig = _config.Clone();
-        if (dir != null) effectiveConfig.Source = dir;
-        var imported = AnalyzeImportedFile(resolvedPath, effectiveConfig);
+        var imported = result.Snapshot.GetResult(resolvedPath);
         if (imported == null) return null;
 
         return CollectExports(imported, moduleName);
@@ -1361,165 +982,6 @@ public sealed class NebraWorkspace
         }
     }
 
-    private void ReanalyzeImporters(string changedUri)
-    {
-        var changedPath = DocumentUri.GetFileSystemPath(DocumentUri.Parse(changedUri));
-        if (changedPath == null) return;
-        var changedFull = Path.GetFullPath(changedPath);
-
-        foreach (var (otherUri, otherText) in _openDocuments)
-        {
-            if (string.Equals(otherUri, changedUri, StringComparison.OrdinalIgnoreCase)) continue;
-            if (!_results.TryGetValue(otherUri, out var otherResult)) continue;
-
-            var imports = otherResult.Hir.Body.OfType<ImportStmt>().Any(import =>
-            {
-                var modName = import.Module.Name;
-                if (modName.EndsWith(".neb")) modName = modName[..^4];
-                var resolved = ResolveImportPath(modName, otherResult.FilePath);
-                return resolved != null
-                       && string.Equals(resolved, changedFull, StringComparison.OrdinalIgnoreCase);
-            });
-
-            if (imports)
-                AnalyzeDocument(otherUri, otherText);
-        }
-    }
-
-    /// <summary>
-    /// Walks every annotated declaration in <paramref name="hir"/> and reports
-    /// any annotation usage diagnostics (unknown name, target mismatch,
-    /// unknown / missing / type-mismatched arguments). Mirrors the validations
-    /// the compiler's <c>ApplyAnnotationsPass.BuildArgs</c> performs &mdash;
-    /// without actually running <c>apply</c> &mdash; so the editor surfaces the
-    /// same errors as <c>nebra build</c>.
-    /// </summary>
-    private void ValidateAnnotations(IRScript hir, DiagnosticsBag diag)
-    {
-        var metas = GetAnnotationMetas();
-        if (metas.Count == 0) return;
-        var byName = metas.ToDictionary(m => m.Name, m => m, StringComparer.Ordinal);
-
-        foreach (var stmt in hir.Body)
-            ValidateAnnotationsOnStmt(stmt, byName, diag);
-    }
-
-    private static void ValidateAnnotationsOnStmt(Stmt stmt, Dictionary<string, Nebra.Compiler.Annotations.AnnotationMeta> metas, DiagnosticsBag diag)
-    {
-        var decl = stmt switch
-        {
-            ExportStmt ex => ex.Declaration,
-            Decl d => d,
-            _ => null
-        };
-        if (decl == null) return;
-
-        var anns = decl switch
-        {
-            FunctionDecl fd => fd.Annotations,
-            LocalFunctionDecl lfd => lfd.Annotations,
-            LocalDecl ld => ld.Annotations,
-            ClassDecl cd => cd.Annotations,
-            EnumDecl ed => ed.Annotations,
-            InterfaceDecl id => id.Annotations,
-            _ => []
-        };
-
-        var targetKind = decl switch
-        {
-            FunctionDecl => Nebra.Compiler.Annotations.AnnotationTargetKind.Function,
-            LocalFunctionDecl => Nebra.Compiler.Annotations.AnnotationTargetKind.LocalFunction,
-            LocalDecl => Nebra.Compiler.Annotations.AnnotationTargetKind.Variable,
-            ClassDecl => Nebra.Compiler.Annotations.AnnotationTargetKind.Class,
-            EnumDecl => Nebra.Compiler.Annotations.AnnotationTargetKind.Enum,
-            InterfaceDecl => Nebra.Compiler.Annotations.AnnotationTargetKind.Interface,
-            _ => Nebra.Compiler.Annotations.AnnotationTargetKind.Function
-        };
-
-        foreach (var ann in anns)
-            ValidateAnnotation(ann, targetKind, metas, diag);
-
-        if (decl is ClassDecl c)
-        {
-            foreach (var f in c.Fields) foreach (var a in f.Annotations)
-                ValidateAnnotation(a, Nebra.Compiler.Annotations.AnnotationTargetKind.ClassField, metas, diag);
-            foreach (var m in c.Methods) foreach (var a in m.Annotations)
-                ValidateAnnotation(a, Nebra.Compiler.Annotations.AnnotationTargetKind.ClassMethod, metas, diag);
-        }
-        if (decl is InterfaceDecl i)
-        {
-            foreach (var f in i.Fields) foreach (var a in f.Annotations)
-                ValidateAnnotation(a, Nebra.Compiler.Annotations.AnnotationTargetKind.InterfaceField, metas, diag);
-            foreach (var m in i.Methods) foreach (var a in m.Annotations)
-                ValidateAnnotation(a, Nebra.Compiler.Annotations.AnnotationTargetKind.InterfaceMethod, metas, diag);
-        }
-        if (decl is EnumDecl e)
-            foreach (var m in e.Members) foreach (var a in m.Annotations)
-                ValidateAnnotation(a, Nebra.Compiler.Annotations.AnnotationTargetKind.EnumMember, metas, diag);
-    }
-
-    private static void ValidateAnnotation(Annotation ann, Nebra.Compiler.Annotations.AnnotationTargetKind targetKind,
-        Dictionary<string, Nebra.Compiler.Annotations.AnnotationMeta> metas, DiagnosticsBag diag)
-    {
-        if (!metas.TryGetValue(ann.Name.Name, out var meta))
-        {
-            diag.Report(ann.Span, NebraDiagnosticCode.ErrUnknownAnnotation, ann.Name.Name);
-            return;
-        }
-
-        if (!meta.Targets.Contains(targetKind))
-        {
-            diag.Report(ann.Span, NebraDiagnosticCode.ErrAnnotationTargetMismatch, ann.Name.Name, targetKind.ToString());
-            return;
-        }
-
-        var specByName = meta.Parameters.ToDictionary(p => p.Name);
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var positionalIdx = 0;
-
-        foreach (var arg in ann.Args)
-        {
-            string name;
-            if (arg.Name != null)
-            {
-                name = arg.Name;
-                if (!specByName.ContainsKey(name))
-                {
-                    diag.Report(arg.Span, NebraDiagnosticCode.ErrAnnotationArgUnknown, ann.Name.Name, name);
-                    continue;
-                }
-            }
-            else
-            {
-                if (positionalIdx >= meta.Parameters.Count)
-                {
-                    diag.Report(arg.Span, NebraDiagnosticCode.ErrAnnotationArgUnknown, ann.Name.Name,
-                        $"<positional #{positionalIdx + 1}>");
-                    continue;
-                }
-                name = meta.Parameters[positionalIdx].Name;
-                positionalIdx++;
-            }
-            seen.Add(name);
-
-            if (!Nebra.Compiler.Passes.ApplyAnnotationsPass.TryFoldLiteral(arg.Value, out var folded))
-            {
-                diag.Report(arg.Span, NebraDiagnosticCode.ErrAnnotationArgNotLiteral, ann.Name.Name, name);
-                continue;
-            }
-
-            if (!Nebra.Compiler.Passes.ApplyAnnotationsPass.TypeMatchesSpec(specByName[name].TypeName, folded, out var actualLabel))
-            {
-                diag.Report(arg.Span, NebraDiagnosticCode.ErrAnnotationArgTypeMismatch,
-                    ann.Name.Name, name, specByName[name].TypeName, actualLabel);
-            }
-        }
-
-        foreach (var spec in meta.Parameters)
-            if (spec.Required && !seen.Contains(spec.Name))
-                diag.Report(ann.Span, NebraDiagnosticCode.ErrAnnotationArgMissing, ann.Name.Name, spec.Name);
-    }
-
     private readonly Dictionary<string, (Nebra.Compiler.Annotations.AnnotationMeta meta, DateTime mtime)> _annotationMetaCache = new();
 
     /// <summary>
@@ -1610,47 +1072,14 @@ public sealed class NebraWorkspace
     /// (absolute path, module specifier suitable for <c>import { X } from "..."</c>).
     /// </summary>
     /// <summary>
-    /// Analyses every project file whose text mentions <paramref name="symbolName"/> and returns the
-    /// results, reusing the cached analysis for documents that are already open. Files that do not
-    /// mention the name are skipped without parsing, which keeps a workspace-wide request from
-    /// paying for the whole project.
+    /// The source files of <paramref name="origin"/>'s snapshot whose text mentions
+    /// <paramref name="symbolName"/>, which narrows a workspace-wide edit to the files it can touch.
     /// </summary>
-    public List<AnalysisResult> AnalyzeFilesMentioning(string symbolName)
+    public static List<AnalysisResult> FilesMentioning(AnalysisResult origin, string symbolName)
     {
-        var results = new List<AnalysisResult>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var cached in _results.Values)
-        {
-            if (!string.IsNullOrEmpty(cached.FilePath)) seen.Add(Path.GetFullPath(cached.FilePath));
-            results.Add(cached);
-        }
-
-        if (_rootPath == null || !Directory.Exists(_rootPath)) return results;
-
-        IEnumerable<string> files;
-        try { files = Directory.EnumerateFiles(_rootPath, "*.neb", SearchOption.AllDirectories); }
-        catch { return results; }
-
-        foreach (var file in files)
-        {
-            var fullPath = Path.GetFullPath(file);
-            if (seen.Contains(fullPath)) continue;
-            if (fullPath.Contains(Path.DirectorySeparatorChar + "nebra_modules" + Path.DirectorySeparatorChar)) continue;
-            if (fullPath.Contains(Path.DirectorySeparatorChar + "out" + Path.DirectorySeparatorChar)) continue;
-
-            string source;
-            try { source = File.ReadAllText(fullPath); }
-            catch { continue; }
-
-            if (!source.Contains(symbolName, StringComparison.Ordinal)) continue;
-
-            var uri = DocumentUri.FromFileSystemPath(fullPath).ToString();
-            var (analysed, _, _) = BuildAnalysis(uri, source);
-            if (analysed != null) results.Add(analysed);
-        }
-
-        return results;
+        return origin.Snapshot.SourceResults()
+            .Where(result => result.SourceText.Contains(symbolName, StringComparison.Ordinal))
+            .ToList();
     }
 
     public List<(string AbsPath, string ModulePath)> FindExportingFiles(string symbolName, string requesterFilePath)

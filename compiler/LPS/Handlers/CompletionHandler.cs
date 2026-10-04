@@ -21,11 +21,11 @@ public sealed class CompletionHandler(NebraWorkspace workspace) : CompletionHand
         "defer", "guard", "continue"
     ];
 
-    public override Task<CompletionList> Handle(CompletionParams request, CancellationToken ct)
+    public override async Task<CompletionList> Handle(CompletionParams request, CancellationToken ct)
     {
         var items = new List<CompletionItem>();
 
-        var result = workspace.GetResult(request.TextDocument.Uri.ToString());
+        var result = await workspace.GetResultAsync(request.TextDocument.Uri.ToString(), ct);
         if (result != null)
         {
             var line = request.Position.Line + 1;
@@ -33,20 +33,20 @@ public sealed class CompletionHandler(NebraWorkspace workspace) : CompletionHand
 
             var annotationItems = TryAnnotationCompletion(result, request.Position);
             if (annotationItems != null)
-                return Task.FromResult(new CompletionList(annotationItems));
+                return new CompletionList(annotationItems);
 
             var importItems = TryImportPathCompletion(result, request.Position);
             if (importItems != null)
-                return Task.FromResult(new CompletionList(importItems));
+                return new CompletionList(importItems);
 
             var importSpecItems = TryImportSpecifierCompletion(result, request.Position);
             if (importSpecItems != null)
-                return Task.FromResult(new CompletionList(importSpecItems));
+                return new CompletionList(importSpecItems);
 
             var memberItems = TryMemberCompletion(result, request.Position);
             if (memberItems != null)
             {
-                return Task.FromResult(new CompletionList(memberItems));
+                return new CompletionList(memberItems);
             }
 
             var typeContext = IsTypeAnnotationContext(result, request.Position);
@@ -122,7 +122,7 @@ public sealed class CompletionHandler(NebraWorkspace workspace) : CompletionHand
             }
         }
 
-        return Task.FromResult(new CompletionList(items));
+        return new CompletionList(items);
     }
 
     private static bool IsTypeKind(NebraSymbolKind kind) =>

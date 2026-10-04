@@ -57,6 +57,47 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
+    public async Task ErrorsInFilesNeverOpenedArePublished()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("src/main.neb", "print(1)\n"),
+            ("src/other.neb", "local count: number = \"three\"\nprint(count)\n"));
+
+        await session.OpenAsync("src/main.neb");
+        var diagnostics = await session.PublishedDiagnostics("src/other.neb");
+
+        Assert.Single(diagnostics);
+    }
+
+    [Fact]
+    public async Task UnknownAnnotationsAreReportedLikeTheBuildReportsThem()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("src/main.neb", "@doesNotExist\nlocal function helper(): nil\nend\n\nhelper()\n"));
+
+        var diagnostics = await session.OpenAsync("src/main.neb");
+
+        var error = Assert.Single(diagnostics);
+        Assert.Contains("doesNotExist", error.Message);
+    }
+
+    [Fact]
+    public async Task ImportersKeepResolvingWhileTheImportedFileDoesNotParse()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("src/lib.neb", "export function answer(): number\n    return 42\nend\n"),
+            ("src/main.neb", "import { answer } from \"lib\"\n\nlocal value: number = answer()\nprint(value)\n"));
+
+        await session.OpenAsync("src/lib.neb");
+        Assert.Empty(await session.OpenAsync("src/main.neb"));
+
+        var broken = await session.ChangeAsync("src/lib.neb", "export function answer(): number\n    return )\nend\n", 2);
+
+        Assert.NotEmpty(broken);
+        Assert.Empty(await session.PublishedDiagnostics("src/main.neb"));
+    }
+
+    [Fact]
     public async Task EditingAFileRepublishesItsDiagnostics()
     {
         await using var session = await LspSession.StartAsync(

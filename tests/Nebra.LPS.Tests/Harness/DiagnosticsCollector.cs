@@ -49,6 +49,28 @@ public sealed class DiagnosticsCollector
         return waiter.Task;
     }
 
+    /// <summary>
+    /// Returns the diagnostics last published for <paramref name="uri"/>, waiting for the first
+    /// publication when there has been none yet.
+    /// </summary>
+    public Task<IReadOnlyList<Diagnostic>> WaitForAny(DocumentUri uri)
+    {
+        var waiter = new TaskCompletionSource<IReadOnlyList<Diagnostic>>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        lock (_gate)
+        {
+            if (_latest.TryGetValue(uri, out var diagnostics))
+            {
+                return Task.FromResult(diagnostics);
+            }
+
+            _waiters.Add((uri, waiter));
+        }
+
+        return waiter.Task;
+    }
+
     public IReadOnlyList<Diagnostic> Latest(DocumentUri uri)
     {
         lock (_gate)
