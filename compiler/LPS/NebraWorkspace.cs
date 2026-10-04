@@ -695,6 +695,8 @@ public sealed class NebraWorkspace
                         ImportType(dstTypes, f.Type, srcTypes, memo), f.IsMeta);
                 foreach (var (n, m) in ct.Methods)
                     if (ImportType(dstTypes, m, srcTypes, memo) is FunctionType bm) target.Methods[n] = bm;
+                foreach (var (n, declaration) in ct.MemberDeclarations)
+                    target.MemberDeclarations[n] = declaration;
                 foreach (var (n, m) in ct.StaticMethods)
                     if (ImportType(dstTypes, m, srcTypes, memo) is FunctionType bm) target.StaticMethods[n] = bm;
                 foreach (var (n, list) in ct.MethodOverloads)
@@ -745,6 +747,8 @@ public sealed class NebraWorkspace
                         ImportType(dstTypes, f.Type, srcTypes, memo), f.IsMeta);
                 foreach (var (n, m) in it.Methods)
                     if (ImportType(dstTypes, m, srcTypes, memo) is FunctionType bm) target.Methods[n] = bm;
+                foreach (var (n, declaration) in it.MemberDeclarations)
+                    target.MemberDeclarations[n] = declaration;
                 foreach (var (n, list) in it.MethodOverloads)
                 {
                     var bridgedList = new List<FunctionType>();

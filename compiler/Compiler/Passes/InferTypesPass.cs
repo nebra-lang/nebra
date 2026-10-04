@@ -794,7 +794,10 @@ public sealed class InferTypesPass() : Pass(PassName, PassScope.PerBuild)
                 ? GetType(pc, field.TypeAnnotation.ResolvedType)
                 : (field.DefaultValue != null ? GetType(pc, field.DefaultValue.Type) : pc.Types.PrimAny);
             if (!field.IsLocal)
+            {
                 classType.InstanceFields[field.Name.Name] = new StructType.Field(field.Name, fieldType);
+                classType.MemberDeclarations.TryAdd(field.Name.Name, field.Name);
+            }
             if (field.IsProtected)
                 classType.ProtectedMembers.Add(field.Name.Name);
             StampMemberSide(pc, field.Annotations, classType.FieldSides, field.Name.Name);
@@ -878,6 +881,7 @@ public sealed class InferTypesPass() : Pass(PassName, PassScope.PerBuild)
             StampMemberSide(pc, method.Annotations,
                 method.IsStatic ? classType.StaticMethodSides : classType.MethodSides,
                 method.Name.Name);
+            classType.MemberDeclarations.TryAdd(method.Name.Name, method.Name);
 
             if (method.IsAbstract)
                 classType.AbstractMethods.Add(method.Name.Name);
@@ -933,6 +937,7 @@ public sealed class InferTypesPass() : Pass(PassName, PassScope.PerBuild)
             StampMemberSide(pc, accessor.Annotations,
                 accessor.Kind == AccessorKind.Getter ? classType.GetterSides : classType.SetterSides,
                 accessor.Name.Name);
+            classType.MemberDeclarations.TryAdd(accessor.Name.Name, accessor.Name);
 
             if (accessor.IsOverride && classType.BaseClass != null)
             {
@@ -1436,6 +1441,7 @@ public sealed class InferTypesPass() : Pass(PassName, PassScope.PerBuild)
             var fType = field.TypeAnnotation != null && field.TypeAnnotation.ResolvedType != TypID.Invalid
                 ? GetType(pc, field.TypeAnnotation.ResolvedType) : pc.Types.PrimAny;
             ifaceType.Fields[field.Name.Name] = new StructType.Field(field.Name, fType);
+            ifaceType.MemberDeclarations.TryAdd(field.Name.Name, field.Name);
             StampMemberSide(pc, field.Annotations, ifaceType.FieldSides, field.Name.Name);
         }
 
@@ -1476,6 +1482,7 @@ public sealed class InferTypesPass() : Pass(PassName, PassScope.PerBuild)
             AppendOverload(ifaceType.Methods, ifaceType.MethodOverloads,
                 ifaceType.MethodOverloadSides, method.Name.Name, ifaceFt, methodSide);
             ifaceType.MethodNodes[method.Name.Name] = method;
+            ifaceType.MemberDeclarations.TryAdd(method.Name.Name, method.Name);
             StampMemberSide(pc, method.Annotations, ifaceType.MethodSides, method.Name.Name);
 
             // A default method carries a body: record it (so implementing classes inherit it)

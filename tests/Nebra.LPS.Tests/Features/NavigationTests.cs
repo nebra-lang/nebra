@@ -55,7 +55,7 @@ public sealed class NavigationTests
         Assert.Equal([session.Location("decl")], targets);
     }
 
-    [Fact(Skip = "#64: no location is returned for a method call")]
+    [Fact]
     public async Task DefinitionOfAMethodJumpsToItsName()
     {
         await using var session = await LspSession.StartAsync(
@@ -64,6 +64,72 @@ public sealed class NavigationTests
 
         await session.OpenAsync("src/main.neb");
         var targets = await session.DefinitionAsync("call");
+
+        Assert.Equal([session.Location("decl")], targets);
+    }
+
+    [Fact]
+    public async Task DefinitionOfAFieldJumpsToItsName()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("src/main.neb",
+                "class Counter\n    {|decl|}value: number = 0\nend\n\nlocal counter = new Counter()\nprint(counter.{|use|}value)\n"));
+
+        await session.OpenAsync("src/main.neb");
+        var targets = await session.DefinitionAsync("use");
+
+        Assert.Equal([session.Location("decl")], targets);
+    }
+
+    [Fact]
+    public async Task DefinitionOfAnInheritedMethodJumpsToTheBaseClass()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("src/main.neb",
+                "class Animal\n    function {|decl|}speak(): string\n        return \"...\"\n    end\nend\n\nclass Cat extends Animal\nend\n\nlocal cat = new Cat()\nprint(cat:{|use|}speak())\n"));
+
+        await session.OpenAsync("src/main.neb");
+        var targets = await session.DefinitionAsync("use");
+
+        Assert.Equal([session.Location("decl")], targets);
+    }
+
+    [Fact]
+    public async Task DefinitionOfAnInterfaceMethodJumpsToTheInterface()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("src/main.neb",
+                "interface Named\n    function {|decl|}name(): string\nend\n\nclass Person implements Named\n    function name(): string\n        return \"ada\"\n    end\nend\n\nlocal named: Named = new Person()\nprint(named:{|use|}name())\n"));
+
+        await session.OpenAsync("src/main.neb");
+        var targets = await session.DefinitionAsync("use");
+
+        Assert.Equal([session.Location("decl")], targets);
+    }
+
+    [Fact]
+    public async Task DefinitionOfAnExtensionMethodJumpsToTheExtendBlock()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("src/main.neb",
+                "extend string\n    function {|decl|}shout(): string\n        return string.upper(self)\n    end\nend\n\nprint((\"hi\"):{|use|}shout())\n"));
+
+        await session.OpenAsync("src/main.neb");
+        var targets = await session.DefinitionAsync("use");
+
+        Assert.Equal([session.Location("decl")], targets);
+    }
+
+    [Fact]
+    public async Task DefinitionOfAMethodOnAnImportedClassJumpsIntoItsFile()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("src/shapes.neb",
+                "export class Square\n    side: number = 2\n\n    function {|decl|}area(): number\n        return self.side * self.side\n    end\nend\n"),
+            ("src/main.neb", "import { Square } from \"shapes\"\n\nlocal square = new Square()\nprint(square:{|use|}area())\n"));
+
+        await session.OpenAsync("src/main.neb");
+        var targets = await session.DefinitionAsync("use");
 
         Assert.Equal([session.Location("decl")], targets);
     }

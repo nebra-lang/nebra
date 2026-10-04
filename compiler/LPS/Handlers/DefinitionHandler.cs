@@ -29,8 +29,11 @@ public sealed class DefinitionHandler(NebraWorkspace workspace) : DefinitionHand
         }
 
         var nameRef = NodeFinder.FindNameRef(result.Hir, line, col);
-        if (nameRef == null || nameRef.Sym == SymID.Invalid)
+        if (nameRef == null)
             return Task.FromResult<LocationOrLocationLinks?>(null);
+
+        if (nameRef.Sym == SymID.Invalid)
+            return Task.FromResult(FindMemberDefinition(result, nameRef, line, col));
 
         if (!result.Syms.GetByID(nameRef.Sym, out var sym))
             return Task.FromResult<LocationOrLocationLinks?>(null);
@@ -72,6 +75,34 @@ public sealed class DefinitionHandler(NebraWorkspace workspace) : DefinitionHand
         };
 
         return Task.FromResult<LocationOrLocationLinks?>(new LocationOrLocationLinks(location2));
+    }
+
+    /// <summary>
+    /// Resolves a member name (<c>obj:method()</c>, <c>obj.field</c>) through the receiver's type to
+    /// the place the member is declared, which may be in another file.
+    /// </summary>
+    private static LocationOrLocationLinks? FindMemberDefinition(AnalysisResult result, NameRef nameRef, int line, int col)
+    {
+        var access = MemberResolver.FindAccess(NodeFinder.Find(result.Hir, line, col), nameRef);
+        if (access == null || access.Receiver.Type == TypID.Invalid)
+            return null;
+
+        if (!result.Types.GetByID(access.Receiver.Type, out var receiverType))
+            return null;
+
+        var declaration = MemberResolver.FindDeclaration(receiverType, access.Member.Name);
+        if (declaration == null)
+            return null;
+
+        var file = string.IsNullOrEmpty(declaration.Span.File) ? result.FilePath : declaration.Span.File;
+        if (!File.Exists(file))
+            return null;
+
+        return new LocationOrLocationLinks(new Location
+        {
+            Uri = DocumentUri.FromFileSystemPath(file),
+            Range = NebraWorkspace.SpanToRange(declaration.Span)
+        });
     }
 
     private static bool IsOnDeclaration(NameRef nameRef, Symbol sym, AnalysisResult result)

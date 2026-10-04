@@ -176,35 +176,13 @@ public sealed class HoverHandler(NebraWorkspace workspace) : HoverHandlerBase
     /// </summary>
     private Hover? TryMemberHover(AnalysisResult result, Node? hoveredNode, NameRef nameRef)
     {
-        Expr? receiver = null;
-        string? memberName = null;
-        bool isMethodCall = false;
+        var access = MemberResolver.FindAccess(hoveredNode, nameRef);
+        if (access == null) return null;
 
-        // NodeFinder picks the tightest span, but ExprStmt and its inner
-        // expression share the same span — when the tie isn't broken the
-        // statement wraps the call we actually want. Unwrap it here.
-        if (hoveredNode is ExprStmt es) hoveredNode = es.Expression;
+        var receiver = access.Receiver;
+        var memberName = access.Member.Name;
+        var isMethodCall = hoveredNode is MethodCallExpr || hoveredNode is ExprStmt { Expression: MethodCallExpr };
 
-        switch (hoveredNode)
-        {
-            case MethodCallExpr mc when mc.MethodName == nameRef:
-                receiver = mc.Object;
-                memberName = mc.MethodName.Name;
-                isMethodCall = true;
-                break;
-            case DotAccessExpr dot when dot.FieldName == nameRef:
-                receiver = dot.Object;
-                memberName = dot.FieldName.Name;
-                break;
-            // The cursor on a method/field name can sometimes land on a
-            // FunctionCall whose callee is a DotAccess (e.g. `Events.CallRemote(...)`).
-            case FunctionCallExpr fc when fc.Callee is DotAccessExpr fcd && fcd.FieldName == nameRef:
-                receiver = fcd.Object;
-                memberName = fcd.FieldName.Name;
-                break;
-        }
-
-        if (receiver == null || memberName == null) return null;
         if (receiver.Type == TypID.Invalid) return null;
         if (!result.Types.GetByID(receiver.Type, out var recvType)) return null;
 

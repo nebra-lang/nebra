@@ -565,6 +565,11 @@ public sealed class ClassType(
     public bool IsAbstract { get; } = isAbstract;
     public Dictionary<string, StructType.Field> InstanceFields { get; } = new();
     public Dictionary<string, FunctionType> Methods { get; } = new();
+    /// <summary>
+    /// The name each member was declared under, keyed by member name. The name carries its span,
+    /// file included, so tooling can locate a member's declaration from the type alone.
+    /// </summary>
+    public Dictionary<string, NameRef> MemberDeclarations { get; } = new();
     public Dictionary<string, FunctionType> StaticMethods { get; } = new();
     public Dictionary<string, FunctionType> Getters { get; } = new();
     public Dictionary<string, FunctionType> Setters { get; } = new();
@@ -633,6 +638,11 @@ public sealed class InterfaceType(
     public List<InterfaceType> BaseInterfaces { get; } = baseInterfaces;
     public Dictionary<string, StructType.Field> Fields { get; } = new();
     public Dictionary<string, FunctionType> Methods { get; } = new();
+    /// <summary>
+    /// The name each member was declared under, keyed by member name. The name carries its span,
+    /// file included, so tooling can locate a member's declaration from the type alone.
+    /// </summary>
+    public Dictionary<string, NameRef> MemberDeclarations { get; } = new();
     public List<TypeParameterType> TypeParams { get; } = new();
 
     /// <summary>
