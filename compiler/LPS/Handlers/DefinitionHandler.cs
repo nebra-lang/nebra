@@ -50,7 +50,7 @@ public sealed class DefinitionHandler(NebraWorkspace workspace) : DefinitionHand
             var loc = new Location
             {
                 Uri = DocumentUri.FromFileSystemPath(imported.FilePath),
-                Range = NebraWorkspace.SpanToRange(imported.Span)
+                Range = NebraWorkspace.SpanToRange(NodeFinder.DeclaredNameSpan(imported.DeclNode, sym.Name))
             };
             return Task.FromResult<LocationOrLocationLinks?>(new LocationOrLocationLinks(loc));
         }
@@ -68,7 +68,7 @@ public sealed class DefinitionHandler(NebraWorkspace workspace) : DefinitionHand
         var location2 = new Location
         {
             Uri = DocumentUri.Parse(fileUri),
-            Range = NebraWorkspace.SpanToRange(declNode.Span)
+            Range = NebraWorkspace.SpanToRange(NodeFinder.DeclaredNameSpan(declNode, sym.Name))
         };
 
         return Task.FromResult<LocationOrLocationLinks?>(new LocationOrLocationLinks(location2));

@@ -32,6 +32,30 @@ public static class NodeFinder
         return refs;
     }
 
+    /// <summary>
+    /// Returns the span of the name <paramref name="decl"/> introduces as <paramref name="name"/>,
+    /// which is the first occurrence of that name inside the declaration. Falls back to the span of
+    /// the whole declaration when it does not write the name itself.
+    /// </summary>
+    public static TextSpan DeclaredNameSpan(Node decl, string name)
+    {
+        if (decl is not Stmt stmt)
+        {
+            return decl.Span;
+        }
+
+        var refs = new List<NameRef>();
+        CollectFromStmt(stmt, refs);
+
+        var declared = refs
+            .Where(nameRef => nameRef.Name == name)
+            .OrderBy(nameRef => nameRef.Span.StartLn)
+            .ThenBy(nameRef => nameRef.Span.StartCol)
+            .FirstOrDefault();
+
+        return declared?.Span ?? decl.Span;
+    }
+
     public static Dictionary<NodeID, Node> BuildNodeRegistry(IRScript script)
     {
         var reg = new Dictionary<NodeID, Node>();

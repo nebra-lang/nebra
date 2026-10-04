@@ -4,7 +4,7 @@ namespace Nebra.LPS.Tests.Features;
 
 public sealed class NavigationTests
 {
-    [Fact(Skip = "#63: the target is the start of the declaration, not the name")]
+    [Fact]
     public async Task DefinitionOfALocalFunctionJumpsToItsName()
     {
         await using var session = await LspSession.StartAsync(
@@ -17,7 +17,7 @@ public sealed class NavigationTests
         Assert.Equal([session.Location("decl")], targets);
     }
 
-    [Fact(Skip = "#63: the target is the start of the declaration, not the name")]
+    [Fact]
     public async Task DefinitionOfAnImportedFunctionJumpsIntoTheDeclaringFile()
     {
         await using var session = await LspSession.StartAsync(
@@ -26,6 +26,31 @@ public sealed class NavigationTests
 
         await session.OpenAsync("src/main.neb");
         var targets = await session.DefinitionAsync("call");
+
+        Assert.Equal([session.Location("decl")], targets);
+    }
+
+    [Fact]
+    public async Task DefinitionOfAParameterJumpsToItsName()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("src/main.neb",
+                "local function scale(value: number, {|decl|}factor: number): number\n    return value * {|use|}factor\nend\n\nprint(scale(2, 3))\n"));
+
+        await session.OpenAsync("src/main.neb");
+        var targets = await session.DefinitionAsync("use");
+
+        Assert.Equal([session.Location("decl")], targets);
+    }
+
+    [Fact]
+    public async Task DefinitionOfATypedLocalJumpsToItsName()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("src/main.neb", "local first: number = 1\nlocal {|decl|}second: number = first + 1\nprint({|use|}second)\n"));
+
+        await session.OpenAsync("src/main.neb");
+        var targets = await session.DefinitionAsync("use");
 
         Assert.Equal([session.Location("decl")], targets);
     }
