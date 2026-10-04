@@ -353,6 +353,15 @@ interfaceMember
     | annotationList ASYNC? FUNCTION NAME funcSignature            # InterfaceMethodMember
     ;
 
+// A member of an interface in a declaration file: fields and method signatures, never a body.
+// Kept apart from interfaceMember, where a signature followed by another method is ambiguous with
+// a default method whose body opens with a function statement; telling them apart there needs
+// lookahead to the end of the interface, which is quadratic in its size.
+declareInterfaceMember
+    : annotationList NAME typeAnnotation                           # DeclareInterfaceFieldMember
+    | annotationList ASYNC? FUNCTION NAME funcSignature            # DeclareInterfaceMethodMember
+    ;
+
 // --- Extension Blocks ---
 // Adds methods to an existing type (class, interface or built-in like string/number).
 // The method call lowers at compile time to a plain function call, so it works on any type.
@@ -431,7 +440,7 @@ declareBody
       declareClassMember*
       END                                                        # DeclareClass
     | INTERFACE NAME typeParamList? (EXTENDS classRef (COMMA classRef)*)?
-      interfaceMember*
+      declareInterfaceMember*
       END                                                        # DeclareInterface
     ;
 
@@ -490,7 +499,7 @@ declareModuleMember
       declareClassMember*
       END                                                        # ModuleDeclareClass
     | annotationList INTERFACE NAME typeParamList? (EXTENDS classRef (COMMA classRef)*)?
-      interfaceMember*
+      declareInterfaceMember*
       END                                                        # ModuleDeclareInterface
     | annotationList EXTEND typeExpr declareExtendMethod* END     # ModuleDeclareExtend
     ;

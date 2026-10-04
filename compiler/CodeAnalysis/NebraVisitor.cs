@@ -635,6 +635,20 @@ public interface INebraVisitor<Result> : IParseTreeVisitor<Result> {
 	/// <return>The visitor result.</return>
 	Result VisitInterfaceMethodMember([NotNull] NebraParser.InterfaceMethodMemberContext context);
 	/// <summary>
+	/// Visit a parse tree produced by the <c>DeclareInterfaceFieldMember</c>
+	/// labeled alternative in <see cref="NebraParser.declareInterfaceMember"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	/// <return>The visitor result.</return>
+	Result VisitDeclareInterfaceFieldMember([NotNull] NebraParser.DeclareInterfaceFieldMemberContext context);
+	/// <summary>
+	/// Visit a parse tree produced by the <c>DeclareInterfaceMethodMember</c>
+	/// labeled alternative in <see cref="NebraParser.declareInterfaceMember"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	/// <return>The visitor result.</return>
+	Result VisitDeclareInterfaceMethodMember([NotNull] NebraParser.DeclareInterfaceMethodMemberContext context);
+	/// <summary>
 	/// Visit a parse tree produced by <see cref="NebraParser.extendDecl"/>.
 	/// </summary>
 	/// <param name="context">The parse tree.</param>

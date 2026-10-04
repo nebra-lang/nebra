@@ -1242,6 +1242,34 @@ public partial class NebraBaseListener : INebraListener {
 	/// <param name="context">The parse tree.</param>
 	public virtual void ExitInterfaceMethodMember([NotNull] NebraParser.InterfaceMethodMemberContext context) { }
 	/// <summary>
+	/// Enter a parse tree produced by the <c>DeclareInterfaceFieldMember</c>
+	/// labeled alternative in <see cref="NebraParser.declareInterfaceMember"/>.
+	/// <para>The default implementation does nothing.</para>
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	public virtual void EnterDeclareInterfaceFieldMember([NotNull] NebraParser.DeclareInterfaceFieldMemberContext context) { }
+	/// <summary>
+	/// Exit a parse tree produced by the <c>DeclareInterfaceFieldMember</c>
+	/// labeled alternative in <see cref="NebraParser.declareInterfaceMember"/>.
+	/// <para>The default implementation does nothing.</para>
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	public virtual void ExitDeclareInterfaceFieldMember([NotNull] NebraParser.DeclareInterfaceFieldMemberContext context) { }
+	/// <summary>
+	/// Enter a parse tree produced by the <c>DeclareInterfaceMethodMember</c>
+	/// labeled alternative in <see cref="NebraParser.declareInterfaceMember"/>.
+	/// <para>The default implementation does nothing.</para>
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	public virtual void EnterDeclareInterfaceMethodMember([NotNull] NebraParser.DeclareInterfaceMethodMemberContext context) { }
+	/// <summary>
+	/// Exit a parse tree produced by the <c>DeclareInterfaceMethodMember</c>
+	/// labeled alternative in <see cref="NebraParser.declareInterfaceMember"/>.
+	/// <para>The default implementation does nothing.</para>
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	public virtual void ExitDeclareInterfaceMethodMember([NotNull] NebraParser.DeclareInterfaceMethodMemberContext context) { }
+	/// <summary>
 	/// Enter a parse tree produced by <see cref="NebraParser.extendDecl"/>.
 	/// <para>The default implementation does nothing.</para>
 	/// </summary>

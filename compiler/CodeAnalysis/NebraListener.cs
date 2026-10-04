@@ -1057,6 +1057,30 @@ public interface INebraListener : IParseTreeListener {
 	/// <param name="context">The parse tree.</param>
 	void ExitInterfaceMethodMember([NotNull] NebraParser.InterfaceMethodMemberContext context);
 	/// <summary>
+	/// Enter a parse tree produced by the <c>DeclareInterfaceFieldMember</c>
+	/// labeled alternative in <see cref="NebraParser.declareInterfaceMember"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	void EnterDeclareInterfaceFieldMember([NotNull] NebraParser.DeclareInterfaceFieldMemberContext context);
+	/// <summary>
+	/// Exit a parse tree produced by the <c>DeclareInterfaceFieldMember</c>
+	/// labeled alternative in <see cref="NebraParser.declareInterfaceMember"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	void ExitDeclareInterfaceFieldMember([NotNull] NebraParser.DeclareInterfaceFieldMemberContext context);
+	/// <summary>
+	/// Enter a parse tree produced by the <c>DeclareInterfaceMethodMember</c>
+	/// labeled alternative in <see cref="NebraParser.declareInterfaceMember"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	void EnterDeclareInterfaceMethodMember([NotNull] NebraParser.DeclareInterfaceMethodMemberContext context);
+	/// <summary>
+	/// Exit a parse tree produced by the <c>DeclareInterfaceMethodMember</c>
+	/// labeled alternative in <see cref="NebraParser.declareInterfaceMember"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	void ExitDeclareInterfaceMethodMember([NotNull] NebraParser.DeclareInterfaceMethodMemberContext context);
+	/// <summary>
 	/// Enter a parse tree produced by <see cref="NebraParser.extendDecl"/>.
 	/// </summary>
 	/// <param name="context">The parse tree.</param>

@@ -312,36 +312,7 @@ internal partial class IRVisitor
 
         var typeParams = VisitTypeParamListContent(context.typeParamList());
 
-        var fields = new List<InterfaceFieldNode>();
-        var methods = new List<InterfaceMethodNode>();
-
-        foreach (var member in context.interfaceMember())
-        {
-            switch (member)
-            {
-                case NebraParser.InterfaceFieldMemberContext field:
-                {
-                    var fieldName = NameRefFromTerm(field.NAME());
-                    var typeAnn = (TypeRef)Visit(field.typeAnnotation().typeExpr());
-                    var fnode = new InterfaceFieldNode(fieldName, typeAnn, SpanFromCtx(field));
-                    fnode.Annotations = VisitAnnotationListContent(field.annotationList());
-                    fields.Add(fnode);
-                    break;
-                }
-                case NebraParser.InterfaceMethodMemberContext method:
-                {
-                    var isAsync = method.ASYNC() != null;
-                    var methodName = NameRefFromTerm(method.NAME());
-                    var (parameters, returnType) = VisitFuncSignatureContent(method.funcSignature());
-                    var imTypeParams = VisitTypeParamListContent(method.funcSignature().typeParamList());
-                    var imNode = new InterfaceMethodNode(methodName, parameters, returnType, isAsync, SpanFromCtx(method));
-                    imNode.TypeParams = imTypeParams;
-                    imNode.Annotations = VisitAnnotationListContent(method.annotationList());
-                    methods.Add(imNode);
-                    break;
-                }
-            }
-        }
+        var (fields, methods) = VisitDeclareInterfaceMembers(context.declareInterfaceMember());
 
         var ifaceDecl = new InterfaceDecl(NewNodeID, SpanFromCtx(context), name, baseInterfaces, fields, methods, isDeclare: true);
         ifaceDecl.TypeParams = typeParams;
@@ -489,14 +460,30 @@ internal partial class IRVisitor
 
         var typeParams = VisitTypeParamListContent(context.typeParamList());
 
+        var (fields, methods) = VisitDeclareInterfaceMembers(context.declareInterfaceMember());
+
+        var ifaceModDecl = new InterfaceDecl(NewNodeID, SpanFromCtx(context), name, baseInterfaces, fields, methods, isDeclare: true);
+        ifaceModDecl.TypeParams = typeParams;
+        ifaceModDecl.BaseInterfaceTypeArgs = baseInterfaceTypeArgs;
+        ifaceModDecl.Annotations = VisitAnnotationListContent(context.annotationList());
+        return ifaceModDecl;
+    }
+
+    /// <summary>
+    /// Lowers the members of an interface in a declaration file, which are fields and method
+    /// signatures only.
+    /// </summary>
+    private (List<InterfaceFieldNode> Fields, List<InterfaceMethodNode> Methods) VisitDeclareInterfaceMembers(
+        NebraParser.DeclareInterfaceMemberContext[] members)
+    {
         var fields = new List<InterfaceFieldNode>();
         var methods = new List<InterfaceMethodNode>();
 
-        foreach (var member in context.interfaceMember())
+        foreach (var member in members)
         {
             switch (member)
             {
-                case NebraParser.InterfaceFieldMemberContext field:
+                case NebraParser.DeclareInterfaceFieldMemberContext field:
                 {
                     var fieldName = NameRefFromTerm(field.NAME());
                     var typeAnn = (TypeRef)Visit(field.typeAnnotation().typeExpr());
@@ -505,14 +492,12 @@ internal partial class IRVisitor
                     fields.Add(fnode);
                     break;
                 }
-                case NebraParser.InterfaceMethodMemberContext method:
+                case NebraParser.DeclareInterfaceMethodMemberContext method:
                 {
-                    var isAsync = method.ASYNC() != null;
                     var methodName = NameRefFromTerm(method.NAME());
                     var (parameters, returnType) = VisitFuncSignatureContent(method.funcSignature());
-                    var imTypeParams = VisitTypeParamListContent(method.funcSignature().typeParamList());
-                    var imNode = new InterfaceMethodNode(methodName, parameters, returnType, isAsync, SpanFromCtx(method));
-                    imNode.TypeParams = imTypeParams;
+                    var imNode = new InterfaceMethodNode(methodName, parameters, returnType, method.ASYNC() != null, SpanFromCtx(method));
+                    imNode.TypeParams = VisitTypeParamListContent(method.funcSignature().typeParamList());
                     imNode.Annotations = VisitAnnotationListContent(method.annotationList());
                     methods.Add(imNode);
                     break;
@@ -520,11 +505,7 @@ internal partial class IRVisitor
             }
         }
 
-        var ifaceModDecl = new InterfaceDecl(NewNodeID, SpanFromCtx(context), name, baseInterfaces, fields, methods, isDeclare: true);
-        ifaceModDecl.TypeParams = typeParams;
-        ifaceModDecl.BaseInterfaceTypeArgs = baseInterfaceTypeArgs;
-        ifaceModDecl.Annotations = VisitAnnotationListContent(context.annotationList());
-        return ifaceModDecl;
+        return (fields, methods);
     }
 
     public override Node VisitClassDecl(NebraParser.ClassDeclContext context)
