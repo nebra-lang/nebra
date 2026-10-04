@@ -3298,7 +3298,7 @@ public sealed class InferTypesPass() : Pass(PassName, PassScope.PerBuild)
     {
         if (pc.File == null || pc.Config.Sides.Count == 0) return Side.All;
         return SidesResolver.ResolveFileSide(pc.Config.Sides,
-            pc.File.Filename ?? "", Environment.CurrentDirectory);
+            pc.File.Filename ?? "", pc.Config.ProjectRoot);
     }
 
     private TypID InferTableConstructor(PassContext pc, TableConstructorExpr tc)

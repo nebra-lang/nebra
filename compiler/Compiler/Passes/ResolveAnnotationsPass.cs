@@ -21,7 +21,7 @@ public sealed class ResolveAnnotationsPass() : Pass(PassName, PassScope.PerBuild
         var registry = new AnnotationRegistry();
         context.Cache[AnnotationRegistry.CacheKey] = registry;
 
-        var baseDir = Environment.CurrentDirectory;
+        var baseDir = context.Config.ProjectRoot;
         foreach (var entry in context.Config.Annotations)
         {
             var fullPath = Path.IsPathRooted(entry) ? entry : Path.Combine(baseDir, entry);
@@ -65,7 +65,7 @@ public sealed class ResolveAnnotationsPass() : Pass(PassName, PassScope.PerBuild
         if (context.Cache.TryGetValue(InstalledPackages.CacheKey, out var cached)
             && cached is IReadOnlyList<InstalledPackage> list)
             return list;
-        return InstalledPackages.Discover(Environment.CurrentDirectory);
+        return InstalledPackages.Discover(context.Config.ProjectRoot);
     }
 
     /// <summary>

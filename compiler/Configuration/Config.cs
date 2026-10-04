@@ -87,6 +87,14 @@ public sealed class Config
     public string Source { get; set; } = "src";
 
     /// <summary>
+    /// The directory the project lives in, which every relative path in the configuration is
+    /// resolved against. Set to the directory of <c>nebra.toml</c> when the configuration is loaded
+    /// from a file, and to the current directory otherwise. Not part of the file format.
+    /// </summary>
+    [Tomlyn.Serialization.TomlIgnore]
+    public string ProjectRoot { get; set; } = Environment.CurrentDirectory;
+
+    /// <summary>
     /// When true, the project ships only <c>.d.neb</c> declaration files (a "types-only"
     /// package — like a TypeScript <c>@types/*</c> shim). <c>nebra build</c>, <c>compile</c>,
     /// <c>run</c> and <c>test</c> become graceful no-ops; <c>nebra docs</c> still generates.
@@ -150,6 +158,8 @@ public sealed class Config
 
     private Config Initialize(string directory, int depth)
     {
+        ProjectRoot = Path.GetFullPath(directory);
+
         if (depth >= 10)
         {
             Console.Error.WriteLine($"Maximum configuration depth exceeded while loading configuration from '{directory}'. Possible circular dependency in extends.");
@@ -280,6 +290,7 @@ public sealed class Config
             GenerateDocs = GenerateDocs,
             GenerateDeclarations = GenerateDeclarations,
             Source = Source,
+            ProjectRoot = ProjectRoot,
             TypesOnly = TypesOnly,
             Globals = [..Globals],
             Annotations = [..Annotations],

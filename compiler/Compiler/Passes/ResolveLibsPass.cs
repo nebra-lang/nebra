@@ -26,7 +26,7 @@ public sealed class ResolveLibsPass() : Pass(PassName, PassScope.PerBuild)
     {
         LoadEmbeddedStdlibDeclarations(context);
 
-        var baseDir = Environment.CurrentDirectory;
+        var baseDir = context.Config.ProjectRoot;
 
         foreach (var globPath in context.Config.Globals)
         {
@@ -128,7 +128,7 @@ public sealed class ResolveLibsPass() : Pass(PassName, PassScope.PerBuild)
         if (context.Cache.TryGetValue(InstalledPackages.CacheKey, out var cached)
             && cached is IReadOnlyList<InstalledPackage> list)
             return list;
-        return InstalledPackages.Discover(Environment.CurrentDirectory);
+        return InstalledPackages.Discover(context.Config.ProjectRoot);
     }
 
     private static void LoadDeclFile(PassContext context, string filePath)

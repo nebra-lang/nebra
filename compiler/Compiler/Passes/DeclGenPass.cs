@@ -12,7 +12,7 @@ public sealed class DeclGenPass() : Pass(PassName, PassScope.PerBuild, true)
     {
         if (!context.Config.GenerateDeclarations) return true;
 
-        var sourceRoot = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, context.Config.Source));
+        var sourceRoot = Path.GetFullPath(Path.Combine(context.Config.ProjectRoot, context.Config.Source));
         var sourceRootWithSep = sourceRoot + Path.DirectorySeparatorChar;
         var sb = new StringBuilder();
         var hasContent = false;

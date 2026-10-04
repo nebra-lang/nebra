@@ -15,7 +15,7 @@ public sealed class ResolvePackagesPass() : Pass(PassName, PassScope.PerBuild)
 
     public override bool Run(PassContext context)
     {
-        var packages = InstalledPackages.Discover(Environment.CurrentDirectory);
+        var packages = InstalledPackages.Discover(context.Config.ProjectRoot);
         context.Cache[InstalledPackages.CacheKey] = packages;
         return true;
     }

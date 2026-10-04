@@ -23,7 +23,7 @@ public sealed class ResolvedModule
 
 public sealed class ModuleResolver(Config config)
 {
-    private readonly string _sourceRoot = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, config.Source));
+    private readonly string _sourceRoot = Path.GetFullPath(Path.Combine(config.ProjectRoot, config.Source));
     private readonly Dictionary<string, ResolvedModule> _cache = new();
 
     public ResolvedModule? Resolve(string moduleName, string? importerPath,
@@ -150,7 +150,7 @@ public sealed class ModuleResolver(Config config)
 
     private IReadOnlyList<InstalledPackage> InstalledPackagesOnDisk()
     {
-        return _installed ??= InstalledPackages.Discover(Environment.CurrentDirectory);
+        return _installed ??= InstalledPackages.Discover(config.ProjectRoot);
     }
 
     private List<InstalledPackage>? _installed;
@@ -168,7 +168,7 @@ public sealed class ModuleResolver(Config config)
         if (Directory.Exists(_sourceRoot))
             paths.Add(_sourceRoot);
 
-        var modulesDir = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, InstalledPackages.ModulesDirName));
+        var modulesDir = Path.GetFullPath(Path.Combine(config.ProjectRoot, InstalledPackages.ModulesDirName));
         if (Directory.Exists(modulesDir))
             paths.Add(modulesDir);
 
@@ -176,7 +176,7 @@ public sealed class ModuleResolver(Config config)
         {
             var libPath = Path.IsPathRooted(lib)
                 ? lib
-                : Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, lib));
+                : Path.GetFullPath(Path.Combine(config.ProjectRoot, lib));
             if (Directory.Exists(libPath))
                 paths.Add(libPath);
         }
@@ -185,7 +185,7 @@ public sealed class ModuleResolver(Config config)
         {
             var gPath = Path.IsPathRooted(g)
                 ? g
-                : Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, g));
+                : Path.GetFullPath(Path.Combine(config.ProjectRoot, g));
             if (Directory.Exists(gPath))
                 paths.Add(gPath);
         }

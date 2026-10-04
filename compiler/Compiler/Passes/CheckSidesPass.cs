@@ -28,7 +28,7 @@ public sealed class CheckSidesPass()
         var fileMask = SidesResolver.ResolveFileSide(
             context.Config.Sides,
             context.File.Filename ?? "",
-            Environment.CurrentDirectory);
+            context.Config.ProjectRoot);
         if (fileMask == Side.All) return true;
 
         VisitStmtList(context, context.File.Hir.Body, fileMask);

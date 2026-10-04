@@ -44,6 +44,19 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
+    public async Task DeclarationsFromAnInstalledDependencyResolve()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("nebra_modules/dep/nebra.toml", "name = \"dep\"\nversion = \"0.1.0\"\ntarget = \"5.4\"\ntypes_only = true\n"),
+            ("nebra_modules/dep/src/dep.d.neb", "declare function depAnswer(): number\n"),
+            ("src/main.neb", "local value: number = depAnswer()\nprint(value)\n"));
+
+        var diagnostics = await session.OpenAsync("src/main.neb");
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
     public async Task EditingAFileRepublishesItsDiagnostics()
     {
         await using var session = await LspSession.StartAsync(
