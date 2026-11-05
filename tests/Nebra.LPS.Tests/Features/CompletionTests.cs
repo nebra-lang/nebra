@@ -153,6 +153,20 @@ public sealed class CompletionTests
     }
 
     [Fact]
+    public async Task TheCommandOfACallCompletionHasATitle()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("src/Date.neb", Dates),
+            ("src/main.neb", "import { DateTime } from \"Date\"\n\nlocal now = DateTime.{|member|}\nprint(now)\n"));
+        await session.OpenAsync("src/main.neb");
+
+        var command = Assert.Single(await session.CompletionItemsAsync("member"), candidate => candidate.Label == "now").Command;
+
+        Assert.NotNull(command);
+        Assert.False(string.IsNullOrEmpty(command.Title));
+    }
+
+    [Fact]
     public async Task CompletionAfterAnUnfinishedAssignmentStillAnswers()
     {
         await using var session = await LspSession.StartAsync(

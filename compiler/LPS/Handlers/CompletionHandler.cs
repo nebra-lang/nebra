@@ -272,7 +272,11 @@ public sealed class CompletionHandler(NebraWorkspace workspace) : CompletionHand
                 {
                     InsertText = $"{item.Label}($0)",
                     InsertTextFormat = InsertTextFormat.Snippet,
-                    Command = Command.Create("editor.action.triggerParameterHints")
+                    Command = new Command
+                    {
+                        Name = "editor.action.triggerParameterHints",
+                        Title = "Trigger parameter hints"
+                    }
                 }
                 : item)
             .ToList();
