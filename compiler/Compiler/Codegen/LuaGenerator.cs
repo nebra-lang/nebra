@@ -19,6 +19,10 @@ public sealed class LuaGenerator(Config config)
 
     public Config Config => config;
 
+    private readonly List<(int GeneratedLine, int SourceLine)> _sourceLines = [];
+    private int _countedBodyLength;
+    private int _bodyLine;
+
     public string Finish()
     {
         var sb = new StringBuilder();
@@ -30,6 +34,44 @@ public sealed class LuaGenerator(Config config)
         }
         sb.Append(_body);
         return sb.ToString();
+    }
+
+    /// <summary>Records that the code written from here on comes from line <paramref name="sourceLine"/> of the source.</summary>
+    public void MarkSourceLine(int sourceLine)
+    {
+        var line = CurrentBodyLine();
+        if (_sourceLines.Count > 0 && _sourceLines[^1].GeneratedLine == line) return;
+
+        _sourceLines.Add((line, sourceLine));
+    }
+
+    /// <summary>
+    /// The source line of every line <see cref="Finish"/> returns, in order, 0 for a line that
+    /// comes from no source. A line carries on the source line before it, as one statement can
+    /// expand over several lines.
+    /// </summary>
+    public int[] SourceLineMap()
+    {
+        var bodyOffset = _preamble.Length == 0 ? 0 : _preamble.ToString().Count(character => character == '\n') + (Minify ? 0 : 1);
+        var map = new int[bodyOffset + CurrentBodyLine() + 1];
+
+        for (var index = 0; index < _sourceLines.Count; index++)
+        {
+            var end = index + 1 < _sourceLines.Count ? _sourceLines[index + 1].GeneratedLine : CurrentBodyLine() + 1;
+            Array.Fill(map, _sourceLines[index].SourceLine, bodyOffset + _sourceLines[index].GeneratedLine, end - _sourceLines[index].GeneratedLine);
+        }
+
+        return map;
+    }
+
+    private int CurrentBodyLine()
+    {
+        for (; _countedBodyLength < _body.Length; _countedBodyLength++)
+        {
+            if (_body[_countedBodyLength] == '\n') _bodyLine++;
+        }
+
+        return _bodyLine;
     }
 
     #region Writing

@@ -507,6 +507,10 @@ internal static class Program
                 if (outputFileDir != null) Directory.CreateDirectory(outputFileDir);
 
                 await File.WriteAllTextAsync(outputPath, file.GeneratedLua);
+                if (file.GeneratedLineSources != null && file.Filename != null)
+                {
+                    await File.WriteAllTextAsync(outputPath + ".map", SourceMapFile.Render(outputPath, file.Filename, file.GeneratedLineSources));
+                }
             }
         }
 

@@ -22,6 +22,9 @@ public sealed class PreparsedFile(string? filename, string content)
 
     public string? GeneratedLua { get; set; }
 
+    /// <summary>The source line of every line of <see cref="GeneratedLua"/>, when source maps are written.</summary>
+    public int[]? GeneratedLineSources { get; set; }
+
     public bool IsDeclarationFile => Filename != null && Filename.EndsWith(".d.neb", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>

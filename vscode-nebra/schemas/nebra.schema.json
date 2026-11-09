@@ -55,6 +55,11 @@
       "description": "Also generate the documentation site on `nebra build`, as `nebra docs` does.",
       "default": false
     },
+    "source_maps": {
+      "type": "boolean",
+      "description": "Write a `.lua.map` next to every generated file, mapping its lines to the `.neb` source, so a host can translate tracebacks.",
+      "default": false
+    },
     "generate_declarations": {
       "type": "boolean",
       "description": "Also emit `.d.neb` declarations on `nebra build`, so other projects can type-check against this one.",

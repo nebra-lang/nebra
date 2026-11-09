@@ -32,6 +32,7 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
                 var gen = new LuaGenerator(context.Config);
                 EmitFile(context, pkg, gen, file);
                 file.GeneratedLua = gen.Finish();
+                if (context.Config.SourceMaps) file.GeneratedLineSources = gen.SourceLineMap();
             }
         }
 
@@ -284,6 +285,7 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
     {
         if (ShouldStrip(ctx, pkg, stmt)) return;
 
+        gen.MarkSourceLine(stmt.Span.StartLn);
         switch (stmt)
         {
             case FunctionDecl fd:
@@ -1716,6 +1718,7 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
 
     private void EmitReturn(PassContext ctx, PackageContext pkg, LuaGenerator gen, ReturnStmt ret)
     {
+        gen.MarkSourceLine(ret.Span.StartLn);
         var marker = _tryReturnHelper != null ? _tryReturnHelper + "_return" : null;
         if (ret.Values.Count == 0)
         {

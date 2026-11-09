@@ -73,6 +73,9 @@ public sealed class Config
     /// Whether to generate type declarations for the transpiled code. If true, the transpiler will generate type declaration files based on the types used in the source code and the type annotations given.
     /// </summary>
     public bool GenerateDeclarations { get; set; } = true;
+
+    /// <summary>Writes a <c>.lua.map</c> next to every generated file, mapping its lines to the source.</summary>
+    public bool SourceMaps { get; set; }
     
     /// <summary>
     /// A list of relative directories or type declaration files to include in the type universe.
@@ -231,6 +234,7 @@ public sealed class Config
         Minify = MergeVal(Minify, config.Minify, false);
         GenerateDocs = MergeVal(GenerateDocs, config.GenerateDocs, false);
         GenerateDeclarations = MergeVal(GenerateDeclarations, config.GenerateDeclarations, true);
+        SourceMaps = MergeVal(SourceMaps, config.SourceMaps, false);
         Source = MergeVal(Source, config.Source, "src");
         TypesOnly = MergeVal(TypesOnly, config.TypesOnly, false);
         RuntimeGlobal = MergeVal(RuntimeGlobal, config.RuntimeGlobal, null);
@@ -330,6 +334,7 @@ public sealed class Config
             Minify = Minify,
             GenerateDocs = GenerateDocs,
             GenerateDeclarations = GenerateDeclarations,
+            SourceMaps = SourceMaps,
             Source = Source,
             ProjectRoot = ProjectRoot,
             SourceOverrides = SourceOverrides,
