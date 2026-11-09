@@ -486,6 +486,32 @@ internal static class Program
     /// relative path would escape <paramref name="outDir"/> and land back in the dependency,
     /// overwriting the output that dependency built under its own configuration.
     /// </summary>
+    /// <summary>Where the Lua of <paramref name="file"/> is written; <c>null</c> for a file that is not written.</summary>
+    private static string? OutputPathOf(Nebra.IR.PreparsedFile file, string baseDir, string fullBaseDir, string outDir)
+    {
+        if (file.GeneratedLua == null || file.IsDeclarationFile) return null;
+        if (file.Filename != null && !IsUnderDirectory(file.Filename, fullBaseDir)) return null;
+
+        var relativePath = Path.GetRelativePath(baseDir, file.Filename ?? "output.lua");
+        return Path.Combine(outDir, Path.ChangeExtension(relativePath, ".lua"));
+    }
+
+    /// <summary>The positions of the files written to <paramref name="outDir"/>, named relative to the working directory.</summary>
+    private static SourceLocations SourceLocationsOf(NebraCompiler compiler, string baseDir, string outDir)
+    {
+        var fullBaseDir = Path.GetFullPath(baseDir);
+        var locations = new SourceLocations();
+        foreach (var file in compiler.Packages.Values.SelectMany(package => package.Files))
+        {
+            if (file.Filename == null || file.GeneratedLineSources == null) continue;
+            if (OutputPathOf(file, baseDir, fullBaseDir, outDir) is not { } outputPath) continue;
+
+            locations.Add(outputPath, Path.GetRelativePath(Environment.CurrentDirectory, file.Filename), file.GeneratedLineSources);
+        }
+
+        return locations;
+    }
+
     private static async Task WriteOutputFilesAsync(NebraCompiler compiler, string baseDir, string outDir, Config config)
     {
         var fullBaseDir = Path.GetFullPath(baseDir);
@@ -497,17 +523,13 @@ internal static class Program
                 // A file whose generated chunk is empty is still written: a module holding only
                 // types compiles to nothing, and importers emit a `require` for it regardless, so
                 // omitting the file turns the import into a load-time failure.
-                if (file.GeneratedLua == null || file.IsDeclarationFile) continue;
-                if (file.Filename != null && !IsUnderDirectory(file.Filename, fullBaseDir)) continue;
-
-                var relativePath = Path.GetRelativePath(baseDir, file.Filename ?? "output.lua");
-                var outputPath = Path.Combine(outDir, Path.ChangeExtension(relativePath, ".lua"));
+                if (OutputPathOf(file, baseDir, fullBaseDir, outDir) is not { } outputPath) continue;
 
                 var outputFileDir = Path.GetDirectoryName(outputPath);
                 if (outputFileDir != null) Directory.CreateDirectory(outputFileDir);
 
                 await File.WriteAllTextAsync(outputPath, file.GeneratedLua);
-                if (file.GeneratedLineSources != null && file.Filename != null)
+                if (config.SourceMaps && file.GeneratedLineSources != null && file.Filename != null)
                 {
                     await File.WriteAllTextAsync(outputPath + ".map", SourceMapFile.Render(outputPath, file.Filename, file.GeneratedLineSources));
                 }
@@ -735,7 +757,7 @@ internal static class Program
             }
         }
 
-        using var runtime = new NebraRuntime();
+        using var runtime = new NebraRuntime { ErrorTranslator = SourceLocationsOf(compiler, baseDir, outDir).Translate };
         runtime.AddPackagePath(outDir);
 
         var modulesDir = Path.Combine(Environment.CurrentDirectory, "nebra_modules");
@@ -1045,12 +1067,12 @@ internal static class Program
         var baseDir = FindCommonParent([.. allNebraFiles]);
         await WriteOutputFilesAsync(compiler, baseDir, outDir, config);
 
-        var compiledPaths = new List<string>();
+        var compiledPaths = new List<(string Lua, string Source)>();
         foreach (var nebraPath in testFiles)
         {
             var rel = Path.GetRelativePath(baseDir, nebraPath);
             var luaPath = Path.Combine(outDir, Path.ChangeExtension(rel, ".lua"));
-            if (File.Exists(luaPath)) compiledPaths.Add(luaPath);
+            if (File.Exists(luaPath)) compiledPaths.Add((luaPath, Path.GetRelativePath(Environment.CurrentDirectory, nebraPath).Replace('\\', '/')));
             else await Console.Error.WriteLineAsync($"nebra test: compiled output missing for {nebraPath}");
         }
 
@@ -1061,10 +1083,12 @@ internal static class Program
             return 1;
         }
 
-        using var runtime = new NebraRuntime();
+        var locations = SourceLocationsOf(compiler, baseDir, outDir);
+        using var runtime = new NebraRuntime { ErrorTranslator = locations.Translate };
         runtime.AddPackagePath(outDir);
         var modulesDir = Path.Combine(Environment.CurrentDirectory, "nebra_modules");
         if (Directory.Exists(modulesDir)) runtime.AddPackagePath(modulesDir);
+        Nebra.Runtime.Bindings.NebraBindings.SetGlobal(runtime, "__nebra_locate", new Func<string, string>(locations.Translate));
 
         if (!runtime.RegisterEmbeddedModule("nebra:test", typeof(Program).Assembly, "test_runtime.lua"))
         {
@@ -1130,18 +1154,19 @@ internal static class Program
             .Where(file => !nestedProjects.Any(project => file.StartsWith(project, StringComparison.Ordinal)));
     }
 
-    private static string BuildTestRunnerScript(List<string> compiledLuaPaths, string? filter, bool quiet)
+    private static string BuildTestRunnerScript(List<(string Lua, string Source)> compiledFiles, string? filter, bool quiet)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("local _T = require(\"nebra:test\")");
+        sb.AppendLine("_T.__set_locate(__nebra_locate)");
         if (quiet) sb.AppendLine("_T.__set_quiet(true)");
         if (!string.IsNullOrEmpty(filter))
             sb.AppendLine($"_T.__set_filter({EscapeLuaString(filter)})");
 
-        foreach (var path in compiledLuaPaths)
+        foreach (var (lua, source) in compiledFiles)
         {
-            sb.AppendLine($"_T.__begin_file({EscapeLuaString(path)})");
-            sb.AppendLine($"dofile({EscapeLuaString(path)})");
+            sb.AppendLine($"_T.__begin_file({EscapeLuaString(source)})");
+            sb.AppendLine($"dofile({EscapeLuaString(lua)})");
         }
 
         sb.AppendLine("_T.__summary()");

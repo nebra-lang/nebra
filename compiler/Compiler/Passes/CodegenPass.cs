@@ -32,7 +32,7 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
                 var gen = new LuaGenerator(context.Config);
                 EmitFile(context, pkg, gen, file);
                 file.GeneratedLua = gen.Finish();
-                if (context.Config.SourceMaps) file.GeneratedLineSources = gen.SourceLineMap();
+                file.GeneratedLineSources = gen.SourceLineMap();
             }
         }
 

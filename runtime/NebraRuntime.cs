@@ -34,6 +34,9 @@ public sealed class NebraRuntime : IDisposable
     /// </summary>
     internal readonly Dictionary<Type, Bindings.NebraClass> ClassRegistry = new();
 
+    /// <summary>Rewrites an error before it is printed, such as to point at the original source.</summary>
+    public Func<string, string>? ErrorTranslator { get; set; }
+
     public NebraRuntime() : this(sandboxed: false) { }
 
     private NebraRuntime(bool sandboxed)
@@ -197,7 +200,7 @@ public sealed class NebraRuntime : IDisposable
         if (callStatus != LuaStatus.OK)
         {
             var err = State.ToString(-1) ?? "unknown runtime error";
-            Console.Error.WriteLine($"nebra run: runtime error: {err}");
+            Console.Error.WriteLine($"nebra run: runtime error: {ErrorTranslator?.Invoke(err) ?? err}");
             State.Pop(1);
             return false;
         }
@@ -225,7 +228,7 @@ public sealed class NebraRuntime : IDisposable
         if (callStatus != LuaStatus.OK)
         {
             var err = State.ToString(-1) ?? "unknown runtime error";
-            Console.Error.WriteLine($"nebra run: runtime error: {err}");
+            Console.Error.WriteLine($"nebra run: runtime error: {ErrorTranslator?.Invoke(err) ?? err}");
             State.Pop(1);
             return false;
         }

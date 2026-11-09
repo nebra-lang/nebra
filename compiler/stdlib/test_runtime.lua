@@ -43,10 +43,15 @@ local function printLine(s)
     if not state.quiet then print(s) end
 end
 
+local function located(err)
+    local text = tostring(err)
+    return state.locate and state.locate(text) or text
+end
+
 local function runHooks(hooks)
     for i = 1, #hooks do
         local ok, err = xpcall(hooks[i], debug.traceback)
-        if not ok then error("hook failed: " .. tostring(err), 0) end
+        if not ok then error("hook failed: " .. located(err), 0) end
     end
 end
 
@@ -72,6 +77,7 @@ function M.test(name, fn)
     if not matchesFilter(full) then return end
     local ok1 = xpcall(function() runHooks(state.beforeEach) end, debug.traceback)
     local ok, err = xpcall(fn, debug.traceback)
+    if not ok then err = located(err) end
     local ok2 = xpcall(function() runHooks(state.afterEach) end, debug.traceback)
     if ok and ok1 and ok2 then
         state.passed = state.passed + 1
@@ -100,6 +106,7 @@ function M.describe(name, fn)
     state.afterEach = {}
     for i = 1, #savedAfter do state.afterEach[i] = savedAfter[i] end
     local ok, err = xpcall(fn, debug.traceback)
+    if not ok then err = located(err) end
     state.beforeEach = savedBefore
     state.afterEach = savedAfter
     state.suiteStack[#state.suiteStack] = nil
@@ -264,6 +271,7 @@ end
 
 function M.__set_filter(f) state.filter = f end
 function M.__set_quiet(b) state.quiet = b end
+function M.__set_locate(fn) state.locate = fn end
 function M.__set_current_file(p) state.currentFile = p end
 
 function M.__begin_file(path)

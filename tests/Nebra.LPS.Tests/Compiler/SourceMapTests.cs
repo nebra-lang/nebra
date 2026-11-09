@@ -64,14 +64,6 @@ public sealed class SourceMapTests
     }
 
     [Fact]
-    public void MapsAreOffByDefault()
-    {
-        var build = ProjectBuild.Run(null, ("src/main.neb", "print(1)\n"));
-
-        Assert.Null(build.Compiler.Packages.Values.SelectMany(package => package.Files).First().GeneratedLineSources);
-    }
-
-    [Fact]
     public void TheFileNamesTheGeneratedFileAndItsSource()
     {
         var root = Directory.CreateTempSubdirectory("nebra-map").FullName;
@@ -81,5 +73,33 @@ public sealed class SourceMapTests
         Assert.Equal("main.lua", map.GetProperty("file").GetString());
         Assert.Equal("../../src/server/main.neb", map.GetProperty("source").GetString());
         Assert.Equal([0, 3], map.GetProperty("lines").EnumerateArray().Select(line => line.GetInt32()));
+    }
+
+    private static SourceLocations Locations()
+    {
+        var locations = new SourceLocations();
+        locations.Add("/project/out/server/main.lua", "src/server/main.neb", [0, 3, 7]);
+        return locations;
+    }
+
+    [Theory]
+    [InlineData("/project/out/server/main.lua:2: boom", "src/server/main.neb:3: boom")]
+    [InlineData("out/server/main.lua:3: boom", "src/server/main.neb:7: boom")]
+    [InlineData(".../out/server/main.lua:2: boom", "src/server/main.neb:3: boom")]
+    [InlineData("in function </project/out/server/main.lua:3>", "in function <src/server/main.neb:7>")]
+    [InlineData("stack traceback:\n\t/project/out/server/main.lua:2: in function 'run'\n\t[C]: in ?", "stack traceback:\n\tsrc/server/main.neb:3: in function 'run'\n\t[C]: in ?")]
+    public void APositionInAGeneratedFileIsTranslated(string text, string expected)
+    {
+        Assert.Equal(expected, Locations().Translate(text));
+    }
+
+    [Theory]
+    [InlineData("/project/out/server/main.lua:1: helper")]
+    [InlineData("/project/out/server/main.lua:9: past the end")]
+    [InlineData("/somewhere/other.lua:2: not ours")]
+    [InlineData("nothing to see: 12")]
+    public void AnythingElseIsLeftAlone(string text)
+    {
+        Assert.Equal(text, Locations().Translate(text));
     }
 }
