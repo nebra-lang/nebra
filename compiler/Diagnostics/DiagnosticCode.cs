@@ -788,6 +788,12 @@ public enum DiagnosticCode
     [Format("Symbol '{0}' is {1}-side only and cannot be used in this {2}-side file")]
     ErrSymbolWrongSide = 0x6002,
 
+    [Level(DiagnosticLevel.Error)]
+    [Category(DiagnosticCategory.Semantic)]
+    [Format("Module '{0}' runs on the {1} side and cannot be imported in this {2}-side file")]
+    [Help("use `import type` if only its types are needed")]
+    ErrImportWrongSide = 0x6003,
+
     #endregion
 
     #region Reflection

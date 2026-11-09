@@ -46,6 +46,7 @@ public sealed class CheckSidesPass()
     {
         switch (stmt)
         {
+            case ImportStmt import: CheckImport(ctx, import, fileMask); break;
             case ExportStmt ex: VisitDecl(ctx, ex.Declaration, fileMask); break;
             case Decl d: VisitDecl(ctx, d, fileMask); break;
             case ExprStmt es: VisitExpr(ctx, es.Expression, fileMask); break;
@@ -327,6 +328,22 @@ public sealed class CheckSidesPass()
                 foreach (var e in tr.ElementTypes) VisitTypeRef(ctx, e, fileMask);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Reports an import of a module whose file accepts a side this file does not run on, which
+    /// fails at runtime on that side. <c>import type</c> loads nothing, so it may cross sides.
+    /// </summary>
+    private static void CheckImport(PassContext ctx, ImportStmt import, Side fileMask)
+    {
+        if (import.IsTypeImport || import.IsTypeOnly) return;
+        if (!ctx.Cache.TryGetValue($"import_resolved:{ctx.File!.Filename}:{import.Module.Name}", out var cached)) return;
+        if (cached is not ResolvedModule { FilePath: { } path }) return;
+
+        var moduleMask = SidesResolver.ResolveFileSide(ctx.Config.Sides, path, ctx.Config.ProjectRoot);
+        if (moduleMask == Side.All || moduleMask.IsAccessibleFrom(fileMask)) return;
+
+        ctx.Diag.Report(import.Module.Span, DiagnosticCode.ErrImportWrongSide, import.Module.Name, moduleMask.Format(), fileMask.Format());
     }
 
     /// <summary>
