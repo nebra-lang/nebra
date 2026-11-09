@@ -133,13 +133,14 @@ public class ResolveTypeRefsPass() : Pass(PassName, PassScope.PerBuild)
         if (!pkg.Syms.GetByID(decl.Name.Sym, out var sym)) return;
         if (sym.Type != TypID.Invalid) return;
 
-        var classType = pkg.Types.ClassOf(decl.Name.Name, isAbstract: decl.IsAbstract);
+        var origin = decl.IsDeclare ? null : decl.Name.Span.File;
+        var classType = pkg.Types.ClassOf(decl.Name.Name, isAbstract: decl.IsAbstract, origin: origin);
         classType.IsSealed = decl.IsSealed;
         classType.HasLocalConstructor = decl.Constructors.Count > 0 && decl.Constructors.All(constructor => constructor.IsLocal);
         classType.ReflectionId = $"{ReflectNamespace(pkg, decl, decl.Name)}::{decl.Name.Name}";
         classType.DeclaredAt ??= decl.Name;
         pkg.Syms.SetType(decl.Name.Sym, classType.ID);
-        MaterializeTypeParams(pkg, decl.TypeParams, $"class:{decl.Name.Name}", classType.TypeParams, ScopeOfDecl(decl.ID));
+        MaterializeTypeParams(pkg, decl.TypeParams, $"class:{decl.Name.Name}@{origin}", classType.TypeParams, ScopeOfDecl(decl.ID));
     }
 
     private void DeclareInterfaceType(PackageContext pkg, InterfaceDecl decl)
@@ -148,11 +149,12 @@ public class ResolveTypeRefsPass() : Pass(PassName, PassScope.PerBuild)
         if (!pkg.Syms.GetByID(decl.Name.Sym, out var sym)) return;
         if (sym.Type != TypID.Invalid) return;
 
-        var interfaceType = pkg.Types.InterfaceOf(decl.Name.Name, isIntrinsic: decl.IsIntrinsic);
+        var origin = decl.IsDeclare ? null : decl.Name.Span.File;
+        var interfaceType = pkg.Types.InterfaceOf(decl.Name.Name, isIntrinsic: decl.IsIntrinsic, origin: origin);
         interfaceType.ReflectionId = $"{ReflectNamespace(pkg, decl, decl.Name)}::{decl.Name.Name}";
         interfaceType.DeclaredAt ??= decl.Name;
         pkg.Syms.SetType(decl.Name.Sym, interfaceType.ID);
-        MaterializeTypeParams(pkg, decl.TypeParams, $"iface:{decl.Name.Name}", interfaceType.TypeParams, ScopeOfDecl(decl.ID));
+        MaterializeTypeParams(pkg, decl.TypeParams, $"iface:{decl.Name.Name}@{origin}", interfaceType.TypeParams, ScopeOfDecl(decl.ID));
     }
 
     /// <summary>
@@ -278,7 +280,7 @@ public class ResolveTypeRefsPass() : Pass(PassName, PassScope.PerBuild)
             members.Add(new EnumType.Member(m.Name.Name, value));
         }
 
-        var enumType = pkg.Types.EnumOf(decl.Name.Name, members, baseType);
+        var enumType = pkg.Types.EnumOf(decl.Name.Name, members, baseType, decl.IsDeclare ? null : decl.Name.Span.File);
         enumType.ReflectionId = $"{ReflectNamespace(pkg, decl, decl.Name)}::{decl.Name.Name}";
         enumType.DeclaredAt ??= decl.Name;
         enumType.IsDeclared = decl.IsDeclare;

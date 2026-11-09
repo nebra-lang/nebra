@@ -2780,7 +2780,7 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
     private static string ExtensionFnName(PassContext ctx, TypID targetType, string method)
     {
         ctx.Types.GetByID(targetType, out var t);
-        var key = t != null ? t.Key.Value : targetType.ToString();
+        var key = t != null ? t.PortableKey : targetType.ToString();
         var sanitized = new string(key.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
         return $"__ext_{sanitized}_{method}";
     }

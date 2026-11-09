@@ -382,6 +382,12 @@ public class Type(TypeKind kind)
     public TypeKey Key => field ??= GenerateNewKey();
 
     /// <summary>
+    /// The key without the files the types in it come from, the same on every machine, for the
+    /// names of generated Lua.
+    /// </summary>
+    public string PortableKey => System.Text.RegularExpressions.Regex.Replace(Key.Value, "@[^<>,]*", "");
+
+    /// <summary>
     /// Generates a new type key based on the type and its information.
     /// </summary>
     protected virtual TypeKey GenerateNewKey()
@@ -702,6 +708,10 @@ public sealed class FunctionType : Type
 public sealed class EnumType(string name, IEnumerable<EnumType.Member> members, Type baseType) : Type(TypeKind.Enum)
 {
     public string Name { get; } = name;
+
+    /// <summary>The file that compiles this enum; <c>null</c> for a declaration. Keeps enums of one name in different files apart.</summary>
+    public string? Origin { get; init; }
+
     public List<Member> Members { get; } = members.ToList();
     public Type BaseType { get; } = baseType;
 
@@ -713,7 +723,7 @@ public sealed class EnumType(string name, IEnumerable<EnumType.Member> members, 
 
     protected override TypeKey GenerateNewKey()
     {
-        return $"enum<{Name}>";
+        return Origin == null ? $"enum<{Name}>" : $"enum<{Name}@{Origin}>";
     }
 
     public sealed class Member(string name, object? value)
@@ -731,7 +741,16 @@ public sealed class ClassType(
 ) : Type(TypeKind.Class)
 {
     public string Name { get; } = name;
+
+    /// <summary>
+    /// The file that compiles this class; <c>null</c> for a declaration, which describes a global
+    /// the host provides. Classes of one name in different files are different types.
+    /// </summary>
+    public string? Origin { get; init; }
+
     public ClassType? BaseClass { get; set; } = baseClass;
+
+    private string QualifiedName => Origin == null ? Name : $"{Name}@{Origin}";
     public List<InterfaceType> Interfaces { get; } = interfaces;
     public bool IsAbstract { get; } = isAbstract;
 
@@ -907,8 +926,8 @@ public sealed class ClassType(
     protected override TypeKey GenerateNewKey()
     {
         return GenericDefinition == null
-            ? $"class<{Name}>"
-            : $"class<{Name}<{string.Join(", ", TypeArguments.Select(argument => argument.Key.Value))}>>";
+            ? $"class<{QualifiedName}>"
+            : $"class<{QualifiedName}<{string.Join(", ", TypeArguments.Select(argument => argument.Key.Value))}>>";
     }
 }
 
@@ -918,6 +937,11 @@ public sealed class InterfaceType(
 ) : Type(TypeKind.Interface)
 {
     public string Name { get; } = name;
+
+    /// <summary>The file that compiles this interface; <c>null</c> for a declaration, which extends the others of its name.</summary>
+    public string? Origin { get; init; }
+
+    private string QualifiedName => Origin == null ? Name : $"{Name}@{Origin}";
     public List<InterfaceType> BaseInterfaces { get; } = baseInterfaces;
     public Dictionary<string, StructType.Field> Fields { get; } = new();
     public Dictionary<string, FunctionType> Methods { get; } = new();
@@ -986,8 +1010,8 @@ public sealed class InterfaceType(
         if (IsIntrinsic) return $"intrinsic<{Name}>";
 
         return GenericDefinition == null
-            ? $"interface<{Name}>"
-            : $"interface<{Name}<{string.Join(", ", TypeArguments.Select(argument => argument.Key.Value))}>>";
+            ? $"interface<{QualifiedName}>"
+            : $"interface<{QualifiedName}<{string.Join(", ", TypeArguments.Select(argument => argument.Key.Value))}>>";
     }
 }
 
@@ -1386,21 +1410,21 @@ public sealed partial class TypeTable
     /// Creates a new enum type with the specified name, members and base type, declares it in the type table,
     /// and returns the registered type instance.
     /// </summary>
-    public EnumType EnumOf(string name, IEnumerable<EnumType.Member> members, Type baseType)
+    public EnumType EnumOf(string name, IEnumerable<EnumType.Member> members, Type baseType, string? origin = null)
     {
-        var enumType = new EnumType(name, members, baseType);
+        var enumType = new EnumType(name, members, baseType) { Origin = origin };
         return (EnumType)DeclareType(enumType);
     }
 
-    public ClassType ClassOf(string name, ClassType? baseClass = null, List<InterfaceType>? interfaces = null, bool isAbstract = false)
+    public ClassType ClassOf(string name, ClassType? baseClass = null, List<InterfaceType>? interfaces = null, bool isAbstract = false, string? origin = null)
     {
-        var classType = new ClassType(name, baseClass, interfaces ?? [], isAbstract);
+        var classType = new ClassType(name, baseClass, interfaces ?? [], isAbstract) { Origin = origin };
         return (ClassType)DeclareType(classType);
     }
 
-    public InterfaceType InterfaceOf(string name, List<InterfaceType>? baseInterfaces = null, bool isIntrinsic = false)
+    public InterfaceType InterfaceOf(string name, List<InterfaceType>? baseInterfaces = null, bool isIntrinsic = false, string? origin = null)
     {
-        var interfaceType = new InterfaceType(name, baseInterfaces ?? []) { IsIntrinsic = isIntrinsic };
+        var interfaceType = new InterfaceType(name, baseInterfaces ?? []) { IsIntrinsic = isIntrinsic, Origin = origin };
         return (InterfaceType)DeclareType(interfaceType);
     }
 

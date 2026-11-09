@@ -26,6 +26,7 @@ public sealed partial class TypeTable
         {
             GenericDefinition = definition,
             TypeArguments = arguments,
+            Origin = definition.Origin,
         });
         if (definition.Instantiations.Contains(instance)) return instance;
 
@@ -44,6 +45,7 @@ public sealed partial class TypeTable
         {
             GenericDefinition = definition,
             TypeArguments = arguments,
+            Origin = definition.Origin,
         });
         if (definition.Instantiations.Contains(instance)) return instance;
 

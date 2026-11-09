@@ -142,7 +142,7 @@ public sealed partial class InferTypesPass
     /// </summary>
     private static string ExtensionLuaName(Type target, ExtensionMethodNode member)
     {
-        var type = new string(target.Key.Value.Select(character => char.IsLetterOrDigit(character) ? character : '_').ToArray());
+        var type = new string(target.PortableKey.Select(character => char.IsLetterOrDigit(character) ? character : '_').ToArray());
         var name = member.Name.Name;
         return member.Kind switch
         {
