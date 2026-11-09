@@ -828,6 +828,18 @@ public sealed class ClassType(
     /// </summary>
     public string? InheritTemplate { get; set; }
 
+    /// <summary>The method a host calls for <c>operator []</c>. Source: the <c>index</c> argument of <c>@overrideInherit</c>.</summary>
+    public string? IndexHook { get; set; }
+
+    /// <summary>The method a host calls for <c>operator []=</c>. Source: the <c>newindex</c> argument of <c>@overrideInherit</c>.</summary>
+    public string? NewIndexHook { get; set; }
+
+    /// <summary>
+    /// Optional template of the Lua condition that tests a value against this class and the
+    /// classes extending it. Source: a <c>@overrideIs("...")</c> builtin annotation on the class.
+    /// </summary>
+    public string? IsTemplate { get; set; }
+
     /// <summary>
     /// The template creating this class: its own, or the one of the nearest declared class it
     /// extends. A template on a class compiled from source names that class alone, so it is
@@ -849,17 +861,25 @@ public sealed class ClassType(
     }
 
     /// <summary>The <see cref="CtorTemplate"/> of this class or of the nearest class it extends that has one.</summary>
-    public string? NearestCtorTemplate
-    {
-        get
-        {
-            for (var current = this; current != null; current = current.BaseClass)
-            {
-                if (current.CtorTemplate != null) return current.CtorTemplate;
-            }
+    public string? NearestCtorTemplate => Nearest(type => type.CtorTemplate);
 
-            return null;
+    /// <summary>The <see cref="IsTemplate"/> of this class or of the nearest class it extends that has one.</summary>
+    public string? NearestIsTemplate => Nearest(type => type.IsTemplate);
+
+    /// <summary>The <see cref="IndexHook"/> of this class or of the nearest class it extends that has one.</summary>
+    public string? NearestIndexHook => Nearest(type => type.IndexHook);
+
+    /// <summary>The <see cref="NewIndexHook"/> of this class or of the nearest class it extends that has one.</summary>
+    public string? NearestNewIndexHook => Nearest(type => type.NewIndexHook);
+
+    private string? Nearest(Func<ClassType, string?> select)
+    {
+        for (var current = this; current != null; current = current.BaseClass)
+        {
+            if (select(current) is { } value) return value;
         }
+
+        return null;
     }
 
     /// <summary>

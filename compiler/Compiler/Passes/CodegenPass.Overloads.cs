@@ -256,7 +256,7 @@ public sealed partial class CodegenPass
                     : RuntimeCheck(gen, member, value, precise)).ToList();
                 return checks.Any(check => check == null) ? null : "(" + string.Join(" or ", checks) + ")";
             }
-            case ClassType classType when precise:
+            case ClassType classType when precise && classType.NearestIsTemplate == null:
                 return $"{gen.GetClassCheckHelper()}({value}, \"{classType.Name}\")";
             case InterfaceType interfaceType when precise:
                 return $"(type({value}) == \"table\" and {value}.__interfaces ~= nil and {value}.__interfaces[\"{interfaceType.Name}\"] == true)";

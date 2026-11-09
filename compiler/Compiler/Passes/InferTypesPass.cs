@@ -1017,6 +1017,10 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
         var inheritTemplate = Nebra.Compiler.Annotations.BuiltinAnnotations.ExtractOverrideInherit(cd.Annotations);
         if (inheritTemplate != null) classType.InheritTemplate = inheritTemplate;
 
+        classType.IndexHook = Nebra.Compiler.Annotations.BuiltinAnnotations.ExtractInheritHook(cd.Annotations, "index");
+        classType.NewIndexHook = Nebra.Compiler.Annotations.BuiltinAnnotations.ExtractInheritHook(cd.Annotations, "newindex");
+        classType.IsTemplate = Nebra.Compiler.Annotations.BuiltinAnnotations.ExtractOverrideIs(cd.Annotations);
+
         LinkBaseClass(pc, cd, classType, report: true);
         if (cd.BaseClass != null && classType.BaseClass != null)
         {
@@ -1876,8 +1880,9 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
     }
 
     /// <summary>
-    /// Reports the members a class created by its host cannot have: accessors and the index and
-    /// call operators need a metatable of their own, and the host keeps the metatable of its entities.
+    /// Reports the members a class created by its host cannot have: accessors and the call operator
+    /// need a metatable of their own, which the host keeps, and the index operators need a method
+    /// of the host to be called through.
     /// </summary>
     private static void CheckHostInheritedMembers(PassContext pc, ClassDecl cd, ClassType classType)
     {
@@ -1888,7 +1893,11 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
             pc.Diag.Report(accessor.Span, Diagnostics.DiagnosticCode.ErrHostInheritedMember, cd.Name.Name, "accessors");
         }
 
-        foreach (var method in cd.Methods.Where(method => method.Name.Name is "__op_index" or "__op_newindex" or "__op_call"))
+        var unsupported = new HashSet<string> { "__op_call" };
+        if (classType.NearestIndexHook == null) unsupported.Add("__op_index");
+        if (classType.NearestNewIndexHook == null) unsupported.Add("__op_newindex");
+
+        foreach (var method in cd.Methods.Where(method => unsupported.Contains(method.Name.Name)))
         {
             pc.Diag.Report(method.Span, Diagnostics.DiagnosticCode.ErrHostInheritedMember, cd.Name.Name, "this operator");
         }

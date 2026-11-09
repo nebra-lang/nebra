@@ -629,6 +629,11 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
             gen.WriteSemicolon();
         }
 
+        if (_hostInheritedClass != null)
+        {
+            EmitHostOperatorHooks(gen, cd, _hostInheritedClass, className);
+        }
+
         // Inherited interface default methods: materialise their bodies on this class.
         if (pkg.Syms.GetByID(cd.Name.Sym, out var clsSym)
             && ctx.Types.GetByID(clsSym.Type, out var clsT) && clsT is ClassType classType
@@ -2053,6 +2058,9 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
             case FunctionType:
                 EmitTypeOfCheck(ctx, pkg, gen, tchk.Inner, "function");
                 break;
+            case ClassType { NearestIsTemplate: { } isTemplate } templated:
+                EmitIsTemplate(ctx, pkg, gen, isTemplate, tchk.Inner, PatternTypeName(ctx, pkg, tchk.TargetType, templated.Name));
+                break;
             case ClassType { GenericDefinition: not null } instance when RuntimeArguments(instance.TypeArguments) is { } arguments:
             {
                 gen.Write(gen.GetGenericClassCheckHelper() + "(");
@@ -2157,6 +2165,13 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
 
     private void EmitInstanceOf(PassContext ctx, PackageContext pkg, LuaGenerator gen, InstanceOfExpr iof)
     {
+        if (iof.TargetType != null && ctx.Types.GetByID(iof.TargetType.ResolvedType, out var templatedTarget)
+            && templatedTarget is ClassType { NearestIsTemplate: { } isTemplate })
+        {
+            EmitIsTemplate(ctx, pkg, gen, isTemplate, iof.Inner, ResolveName(ctx, pkg, iof.ClassName));
+            return;
+        }
+
         if (iof.TargetType != null && ctx.Types.GetByID(iof.TargetType.ResolvedType, out var target)
             && target is ClassType { GenericDefinition: not null } instance && RuntimeArguments(instance.TypeArguments) is { } arguments)
         {
@@ -2338,6 +2353,9 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
                     {
                         switch (t)
                         {
+                            case ClassType { NearestIsTemplate: { } isTemplate } templated:
+                                gen.Write(ExpandIsTemplate(isTemplate, scrutineeTemp, PatternTypeName(ctx, pkg, pattern.TypeRef, templated.Name)));
+                                break;
                             case ClassType ct:
                             {
                                 var helper = gen.GetInstanceOfHelper();

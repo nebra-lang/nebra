@@ -128,6 +128,44 @@ public sealed partial class CodegenPass
         gen.WriteSemicolon();
     }
 
+    /// <summary>Names the index operators a class declares after the methods its host calls for them.</summary>
+    private static void EmitHostOperatorHooks(LuaGenerator gen, ClassDecl cd, ClassType classType, string className)
+    {
+        EmitHostOperatorHook(gen, cd, className, "__op_index", classType.NearestIndexHook);
+        EmitHostOperatorHook(gen, cd, className, "__op_newindex", classType.NearestNewIndexHook);
+    }
+
+    private static void EmitHostOperatorHook(LuaGenerator gen, ClassDecl cd, string className, string operatorName, string? hook)
+    {
+        if (hook == null || cd.Methods.All(method => method.Name.Name != operatorName)) return;
+
+        gen.WriteLine($"{className}.{hook} = {className}.{operatorName}");
+        gen.WriteSemicolon();
+    }
+
+    /// <summary>
+    /// Emits the test of <paramref name="value"/> against a class with an <c>@overrideIs</c>
+    /// template. The template may use the value several times, so anything but a plain name is
+    /// evaluated once, as the argument of a function.
+    /// </summary>
+    private void EmitIsTemplate(PassContext ctx, PackageContext pkg, LuaGenerator gen, string template, Expr value, string className)
+    {
+        if (value is NameExpr name)
+        {
+            gen.Write(ExpandIsTemplate(template, ResolveName(ctx, pkg, name.Name), className));
+            return;
+        }
+
+        gen.Write($"(function(__value) return {ExpandIsTemplate(template, "__value", className)} end)(");
+        EmitExpr(ctx, pkg, gen, value);
+        gen.Write(")");
+    }
+
+    private static string ExpandIsTemplate(string template, string value, string className)
+    {
+        return "(" + template.Replace("$value", value).Replace("$class", className) + ")";
+    }
+
     /// <summary>
     /// Whether a <c>super:method()</c> call of a class created by its host reaches a method of
     /// the host rather than one of a base class compiled from source.

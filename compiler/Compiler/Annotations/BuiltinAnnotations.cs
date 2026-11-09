@@ -14,6 +14,7 @@ public static class BuiltinAnnotations
     public const string Side = "side";
     public const string OverrideCtor = "overrideCtor";
     public const string OverrideInherit = "overrideInherit";
+    public const string OverrideIs = "overrideIs";
 
     /// <summary>
     /// Marks a declaration for inclusion under <c>[reflection] mode = "annotated"</c>. Read
@@ -23,7 +24,7 @@ public static class BuiltinAnnotations
     /// </summary>
     public const string Reflectable = "reflectable";
 
-    private static readonly HashSet<string> Names = new(StringComparer.Ordinal) { Side, OverrideCtor, OverrideInherit, Reflectable };
+    private static readonly HashSet<string> Names = new(StringComparer.Ordinal) { Side, OverrideCtor, OverrideInherit, OverrideIs, Reflectable };
 
     public static bool IsBuiltin(string name) => Names.Contains(name);
 
@@ -127,6 +128,33 @@ public static class BuiltinAnnotations
     public static string? ExtractOverrideInherit(List<Annotation>? annotations)
     {
         return ExtractTemplate(annotations, OverrideInherit);
+    }
+
+    /// <summary>
+    /// Extracts the named argument <paramref name="hook"/> of <c>@overrideInherit</c>: the method
+    /// the host calls on an instance for an operator, such as <c>index = "index"</c>.
+    /// </summary>
+    public static string? ExtractInheritHook(List<Annotation>? annotations, string hook)
+    {
+        if (annotations == null) return null;
+
+        var inherit = annotations.FirstOrDefault(annotation => annotation.Name.Name == OverrideInherit);
+        var argument = inherit?.Args.FirstOrDefault(candidate => candidate.Name == hook);
+        return argument?.Value is StringLiteralExpr literal ? literal.Value : null;
+    }
+
+    /// <summary>
+    /// Extracts the template from <c>@overrideIs("...")</c> on a class declaration, or null when
+    /// the annotation is absent or its argument is not a string literal. The template is the Lua
+    /// condition testing a value against the class and the classes extending it:
+    /// <list type="bullet">
+    ///   <item><description><c>$value</c> → the value being tested.</description></item>
+    ///   <item><description><c>$class</c> → the resolved name of the class tested against.</description></item>
+    /// </list>
+    /// </summary>
+    public static string? ExtractOverrideIs(List<Annotation>? annotations)
+    {
+        return ExtractTemplate(annotations, OverrideIs);
     }
 
     private static string? ExtractTemplate(List<Annotation>? annotations, string annotationName)
