@@ -190,6 +190,9 @@ public sealed class ImportStmt(NodeID id, TextSpan span, ImportKind kind, NameRe
     /// name each specifier gives them, so a module can gather the exports of others.
     /// </summary>
     public bool IsReExport { get; init; }
+
+    /// <summary>The glob this import was expanded from, when it was written as <c>import "models/*.neb"</c>.</summary>
+    public string? ExpandedFrom { get; init; }
 }
 
 public sealed class ExportStmt(NodeID id, TextSpan span, Decl declaration) : Stmt(id, span)

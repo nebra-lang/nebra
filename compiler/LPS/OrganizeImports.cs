@@ -13,7 +13,7 @@ public static class OrganizeImports
     /// <summary>The edits that organize the imports of <paramref name="result"/>, or none when they already are.</summary>
     public static List<TextEdit> Compute(AnalysisResult result)
     {
-        var imports = result.Hir.Body.OfType<ImportStmt>().ToList();
+        var imports = result.Hir.Body.OfType<ImportStmt>().DistinctBy(import => (object?)import.ExpandedFrom ?? import).ToList();
         if (imports.Count == 0) return [];
 
         var block = string.Concat(Organize(result, imports));

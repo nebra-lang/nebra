@@ -223,6 +223,8 @@ public sealed class ResolveImportsPass() : Pass(PassName, PassScope.PerBuild)
     private void ProcessFileImports(PassContext ctx, PackageContext pkg, PreparsedFile file,
         List<PreparsedFile> newFiles)
     {
+        GlobImports.Expand(file, ctx.Config, ctx.Diag, ctx.NodeAlloc);
+
         foreach (var stmt in file.Hir.Body)
         {
             if (stmt is not ImportStmt import) continue;

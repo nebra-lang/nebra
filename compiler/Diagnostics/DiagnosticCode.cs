@@ -472,6 +472,12 @@ public enum DiagnosticCode
     [Help("use plain methods instead")]
     ErrHostInheritedMember = 0x4047,
 
+    [Level(DiagnosticLevel.Warning)]
+    [Category(DiagnosticCategory.Semantic)]
+    [Format("no file matches the import '{0}'")]
+    [Help("the path is relative to this file or the source root")]
+    WarnGlobImportEmpty = 0x4048,
+
     [Level(DiagnosticLevel.Error)]
     [Category(DiagnosticCategory.Semantic)]
     [Format("{0}")]
