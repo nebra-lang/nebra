@@ -1299,11 +1299,17 @@ public interface INebraVisitor<Result> : IParseTreeVisitor<Result> {
 	/// <return>The visitor result.</return>
 	Result VisitFunctionType([NotNull] NebraParser.FunctionTypeContext context);
 	/// <summary>
-	/// Visit a parse tree produced by <see cref="NebraParser.typeList"/>.
+	/// Visit a parse tree produced by <see cref="NebraParser.functionTypeParams"/>.
 	/// </summary>
 	/// <param name="context">The parse tree.</param>
 	/// <return>The visitor result.</return>
-	Result VisitTypeList([NotNull] NebraParser.TypeListContext context);
+	Result VisitFunctionTypeParams([NotNull] NebraParser.FunctionTypeParamsContext context);
+	/// <summary>
+	/// Visit a parse tree produced by <see cref="NebraParser.functionTypeParam"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	/// <return>The visitor result.</return>
+	Result VisitFunctionTypeParam([NotNull] NebraParser.FunctionTypeParamContext context);
 	/// <summary>
 	/// Visit a parse tree produced by the <c>EmptyTableType</c>
 	/// labeled alternative in <see cref="NebraParser.tableType"/>.

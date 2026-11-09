@@ -128,9 +128,13 @@ internal partial class IRVisitor
 
     public override Node VisitFunctionType(NebraParser.FunctionTypeContext context)
     {
-        var paramTypes = context.typeList()?.typeExpr().Select(t => (TypeRef)Visit(t)).ToList() ?? [];
+        var parameters = context.functionTypeParams()?.functionTypeParam() ?? [];
+        var paramTypes = parameters.Select(parameter => (TypeRef)Visit(parameter.typeExpr())).ToList();
         var returnType = (TypeRef)Visit(context.typeExpr());
-        return new FunctionTypeRef(NewNodeID, SpanFromCtx(context), paramTypes, returnType);
+        return new FunctionTypeRef(NewNodeID, SpanFromCtx(context), paramTypes, returnType)
+        {
+            ParamNames = parameters.Select(parameter => parameter.memberName()?.GetText()).ToList()
+        };
     }
 
     public override Node VisitEmptyTableType(NebraParser.EmptyTableTypeContext context)

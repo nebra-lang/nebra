@@ -2187,15 +2187,25 @@ public interface INebraListener : IParseTreeListener {
 	/// <param name="context">The parse tree.</param>
 	void ExitFunctionType([NotNull] NebraParser.FunctionTypeContext context);
 	/// <summary>
-	/// Enter a parse tree produced by <see cref="NebraParser.typeList"/>.
+	/// Enter a parse tree produced by <see cref="NebraParser.functionTypeParams"/>.
 	/// </summary>
 	/// <param name="context">The parse tree.</param>
-	void EnterTypeList([NotNull] NebraParser.TypeListContext context);
+	void EnterFunctionTypeParams([NotNull] NebraParser.FunctionTypeParamsContext context);
 	/// <summary>
-	/// Exit a parse tree produced by <see cref="NebraParser.typeList"/>.
+	/// Exit a parse tree produced by <see cref="NebraParser.functionTypeParams"/>.
 	/// </summary>
 	/// <param name="context">The parse tree.</param>
-	void ExitTypeList([NotNull] NebraParser.TypeListContext context);
+	void ExitFunctionTypeParams([NotNull] NebraParser.FunctionTypeParamsContext context);
+	/// <summary>
+	/// Enter a parse tree produced by <see cref="NebraParser.functionTypeParam"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	void EnterFunctionTypeParam([NotNull] NebraParser.FunctionTypeParamContext context);
+	/// <summary>
+	/// Exit a parse tree produced by <see cref="NebraParser.functionTypeParam"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	void ExitFunctionTypeParam([NotNull] NebraParser.FunctionTypeParamContext context);
 	/// <summary>
 	/// Enter a parse tree produced by the <c>EmptyTableType</c>
 	/// labeled alternative in <see cref="NebraParser.tableType"/>.

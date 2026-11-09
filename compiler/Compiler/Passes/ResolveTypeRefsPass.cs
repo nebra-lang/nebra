@@ -127,6 +127,15 @@ public class ResolveTypeRefsPass() : Pass(PassName, PassScope.PerBuild)
         }
     }
 
+    /// <summary>The type of a written function type, carrying the parameter names written in it.</summary>
+    private static FunctionType FunctionTypeOf(FunctionTypeRef written, List<IR.Type> paramTypes, IR.Type returnType)
+    {
+        if (written.ParamNames.All(name => name == null)) return new FunctionType(paramTypes, returnType);
+
+        var parameters = paramTypes.Select((type, index) => Tuple.Create(written.ParamNames[index] ?? $"arg{index}", type));
+        return new FunctionType(parameters, returnType);
+    }
+
     private void DeclareClassType(PackageContext pkg, ClassDecl decl)
     {
         if (decl.Name.Sym == SymID.Invalid) return;
@@ -1043,7 +1052,7 @@ public class ResolveTypeRefsPass() : Pass(PassName, PassScope.PerBuild)
                 var t = (FunctionTypeRef) tr;
                 var paramTypes = t.ParamTypes.Select(pt => ResolveTypeRef(tt, pt)).ToList();
                 var returnType = ResolveTypeRef(tt, t.ReturnType);
-                result = tt.DeclareType(new FunctionType(paramTypes, returnType));
+                result = tt.DeclareType(FunctionTypeOf(t, paramTypes, returnType));
                 break;
             }
             case TypeKind.Literal:

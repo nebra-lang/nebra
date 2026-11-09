@@ -2058,7 +2058,7 @@ public partial class NebraBaseVisitor<Result> : AbstractParseTreeVisitor<Result>
 	/// <return>The visitor result.</return>
 	public virtual Result VisitFunctionType([NotNull] NebraParser.FunctionTypeContext context) { return VisitChildren(context); }
 	/// <summary>
-	/// Visit a parse tree produced by <see cref="NebraParser.typeList"/>.
+	/// Visit a parse tree produced by <see cref="NebraParser.functionTypeParams"/>.
 	/// <para>
 	/// The default implementation returns the result of calling <see cref="AbstractParseTreeVisitor{Result}.VisitChildren(IRuleNode)"/>
 	/// on <paramref name="context"/>.
@@ -2066,7 +2066,17 @@ public partial class NebraBaseVisitor<Result> : AbstractParseTreeVisitor<Result>
 	/// </summary>
 	/// <param name="context">The parse tree.</param>
 	/// <return>The visitor result.</return>
-	public virtual Result VisitTypeList([NotNull] NebraParser.TypeListContext context) { return VisitChildren(context); }
+	public virtual Result VisitFunctionTypeParams([NotNull] NebraParser.FunctionTypeParamsContext context) { return VisitChildren(context); }
+	/// <summary>
+	/// Visit a parse tree produced by <see cref="NebraParser.functionTypeParam"/>.
+	/// <para>
+	/// The default implementation returns the result of calling <see cref="AbstractParseTreeVisitor{Result}.VisitChildren(IRuleNode)"/>
+	/// on <paramref name="context"/>.
+	/// </para>
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	/// <return>The visitor result.</return>
+	public virtual Result VisitFunctionTypeParam([NotNull] NebraParser.FunctionTypeParamContext context) { return VisitChildren(context); }
 	/// <summary>
 	/// Visit a parse tree produced by the <c>EmptyTableType</c>
 	/// labeled alternative in <see cref="NebraParser.tableType"/>.

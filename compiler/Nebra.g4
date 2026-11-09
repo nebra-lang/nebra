@@ -731,20 +731,26 @@ typeArg
     ;
 
 // --- Function Types ---
-// The param list contains bare types (no names).
+// The param list contains types, each optionally named. A name documents the parameter and has
+// no effect on which functions fit.
 // Return type is a full typeExpr, so multi-return uses tuple grouping.
 // Examples:
 //   () -> void
 //   (number) -> string
 //   (number, string) -> boolean
+//   (entity: number, value: string?) -> nil
 //   () -> (number, string)             -- returns tuple
 
 functionType
-    : LPAREN typeList? RPAREN ARROW typeExpr
+    : LPAREN functionTypeParams? RPAREN ARROW typeExpr
     ;
 
-typeList
-    : typeExpr (COMMA typeExpr)*
+functionTypeParams
+    : functionTypeParam (COMMA functionTypeParam)*
+    ;
+
+functionTypeParam
+    : (memberName COLON)? typeExpr
     ;
 
 // --- Table Types ---

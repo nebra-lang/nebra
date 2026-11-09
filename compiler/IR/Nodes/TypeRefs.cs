@@ -35,6 +35,9 @@ public sealed class FunctionTypeRef(NodeID id, TextSpan span, List<TypeRef> para
 {
     public List<TypeRef> ParamTypes { get; } = paramTypes;
     public TypeRef ReturnType { get; } = returnType;
+
+    /// <summary>The name written for each parameter, parallel to <see cref="ParamTypes"/>; <c>null</c> where none is.</summary>
+    public List<string?> ParamNames { get; init; } = [];
 }
 
 /// <summary>

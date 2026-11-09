@@ -2570,17 +2570,29 @@ public partial class NebraBaseListener : INebraListener {
 	/// <param name="context">The parse tree.</param>
 	public virtual void ExitFunctionType([NotNull] NebraParser.FunctionTypeContext context) { }
 	/// <summary>
-	/// Enter a parse tree produced by <see cref="NebraParser.typeList"/>.
+	/// Enter a parse tree produced by <see cref="NebraParser.functionTypeParams"/>.
 	/// <para>The default implementation does nothing.</para>
 	/// </summary>
 	/// <param name="context">The parse tree.</param>
-	public virtual void EnterTypeList([NotNull] NebraParser.TypeListContext context) { }
+	public virtual void EnterFunctionTypeParams([NotNull] NebraParser.FunctionTypeParamsContext context) { }
 	/// <summary>
-	/// Exit a parse tree produced by <see cref="NebraParser.typeList"/>.
+	/// Exit a parse tree produced by <see cref="NebraParser.functionTypeParams"/>.
 	/// <para>The default implementation does nothing.</para>
 	/// </summary>
 	/// <param name="context">The parse tree.</param>
-	public virtual void ExitTypeList([NotNull] NebraParser.TypeListContext context) { }
+	public virtual void ExitFunctionTypeParams([NotNull] NebraParser.FunctionTypeParamsContext context) { }
+	/// <summary>
+	/// Enter a parse tree produced by <see cref="NebraParser.functionTypeParam"/>.
+	/// <para>The default implementation does nothing.</para>
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	public virtual void EnterFunctionTypeParam([NotNull] NebraParser.FunctionTypeParamContext context) { }
+	/// <summary>
+	/// Exit a parse tree produced by <see cref="NebraParser.functionTypeParam"/>.
+	/// <para>The default implementation does nothing.</para>
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	public virtual void ExitFunctionTypeParam([NotNull] NebraParser.FunctionTypeParamContext context) { }
 	/// <summary>
 	/// Enter a parse tree produced by the <c>EmptyTableType</c>
 	/// labeled alternative in <see cref="NebraParser.tableType"/>.
