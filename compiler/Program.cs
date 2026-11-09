@@ -69,12 +69,13 @@ internal static class Program
         return exit;
     }
 
-    private static async Task<int> RunBuildAsync(string[] fileArgs)
+    private static async Task<int> RunBuildAsync(string[] args)
     {
+        var fileArgs = args.Where(argument => argument != "--no-clean").ToArray();
         if (fileArgs.Length > 0)
             return await RunBuildFilesAsync(fileArgs);
 
-        return await RunBuildProjectAsync();
+        return await RunBuildProjectAsync(cleanOutput: fileArgs.Length == args.Length);
     }
 
     /// <summary>
@@ -94,11 +95,11 @@ internal static class Program
         return config != null;
     }
 
-    private static async Task<int> RunBuildProjectAsync()
+    private static async Task<int> RunBuildProjectAsync(bool cleanOutput)
     {
         var configPath = Path.Combine(Environment.CurrentDirectory, "nebra.toml");
         if (!TryLoadProjectConfig(configPath, out var config)) return 1;
-        return await CompileProjectAsync(config, runScripts: true);
+        return await CompileProjectAsync(config, runScripts: true, cleanOutput);
     }
 
     /// <summary>
@@ -107,8 +108,19 @@ internal static class Program
     /// (with pre/post-build scripts) and <c>nebra watch</c> (scripts skipped — a watch loop
     /// should only recompile, not re-run side-effecting build hooks on every save).
     /// </summary>
-    private static async Task<int> CompileProjectAsync(Config config, bool runScripts)
+    private static async Task CleanOutputAsync(Config config, DateTime buildStart)
     {
+        var refusal = OutputCleaner.Clean(config, Environment.CurrentDirectory, buildStart);
+        if (refusal != null)
+        {
+            await Console.Error.WriteLineAsync($"Warning: not clearing the output directory '{config.Output}': {refusal}.");
+        }
+    }
+
+    private static async Task<int> CompileProjectAsync(Config config, bool runScripts, bool cleanOutput = false)
+    {
+        var buildStart = DateTime.UtcNow;
+
         if (config.TypesOnly)
         {
             return await CheckTypesOnlyProjectAsync(config);
@@ -156,6 +168,8 @@ internal static class Program
             await Console.Error.WriteLineAsync("Build FAILED.");
             return 1;
         }
+
+        if (cleanOutput) await CleanOutputAsync(config, buildStart);
 
         Directory.CreateDirectory(outDir);
         await WriteOutputFilesAsync(compiler, srcDir, outDir, config);
@@ -843,6 +857,7 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("Commands:");
         Console.WriteLine("  build              Compile the project (reads nebra.toml)");
+        Console.WriteLine("                     Flags: --no-clean (keep files from earlier builds)");
         Console.WriteLine("  build <files...>   Compile specific .neb files (optional nebra.toml)");
         Console.WriteLine("  watch              Recompile the project whenever a *.neb file changes");
         Console.WriteLine("                     Flags: --debounce <ms> (default 300)");
