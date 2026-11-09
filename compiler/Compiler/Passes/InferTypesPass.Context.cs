@@ -1,3 +1,5 @@
+using Nebra.Compiler.Annotations;
+using Nebra.Diagnostics;
 using Nebra.IR;
 using Type = Nebra.IR.Type;
 
@@ -80,9 +82,11 @@ public sealed partial class InferTypesPass
         for (var i = 0; i < arguments.Count; i++)
         {
             var position = i + offset;
-            if (!IsPending(arguments[i]) || position >= argTypes.Count) continue;
+            if (position >= argTypes.Count) continue;
 
             var parameter = position < fnType.ParamTypes.Count ? fnType.ParamTypes[position] : fnType.IsVararg ? fnType.VarargType : null;
+            if (!IsPending(arguments[i]) && !IsTableForContract(pc, arguments[i], parameter)) continue;
+
             if (parameter != null && ContainsTypeParameter(parameter))
                 parameter = Specialize(pc, parameter, fnType, arguments, argTypes, offset);
 
@@ -116,6 +120,74 @@ public sealed partial class InferTypesPass
     private bool IsPending(Expr value) =>
         value is FunctionDefExpr literal ? _pendingLiterals.Contains(literal) : value is TableConstructorExpr table && _pendingTables.Contains(table);
 
+    private bool IsTableForContract(PassContext pc, Expr argument, Type? parameter)
+    {
+        return argument is TableConstructorExpr
+               && parameter != null
+               && pc.Types.GetByID(StripNil(pc, parameter.ID), out var shape)
+               && shape is InterfaceType { IsContract: true };
+    }
+
+    /// <summary>Reports the literal fields of a table written for a contract that break a rule of the contract.</summary>
+    private static void CheckContractLiteral(PassContext pc, TableConstructorExpr table, Type shape)
+    {
+        if (shape is not InterfaceType { IsContract: true } contract) return;
+
+        foreach (var field in table.Fields)
+        {
+            var name = field.Name?.Name ?? (field.Key as StringLiteralExpr)?.Value;
+            if (name == null) continue;
+
+            foreach (var rule in contract.RulesOf(name).Where(rule => rule.Rejects(field.Value)))
+            {
+                pc.Diag.Report(field.Value.Span, DiagnosticCode.ErrContractViolation, name, contract.Name, rule.Requirement);
+            }
+        }
+    }
+
+    /// <summary>Records the rules written on a field of a contract, reporting those that are malformed or do not fit the field's type.</summary>
+    private static void ReadContractRules(PassContext pc, InterfaceType contract, InterfaceFieldNode field, Type fieldType)
+    {
+        var rules = new List<ContractRule>();
+        foreach (var annotation in field.Annotations.Where(annotation => !BuiltinAnnotations.IsBuiltin(annotation.Name.Name)))
+        {
+            var rule = ContractRules.Parse(annotation, out var problem);
+            if (rule == null)
+            {
+                pc.Diag.Report(annotation.Span, DiagnosticCode.ErrContractRuleInvalid, annotation.Name.Name, problem!);
+                continue;
+            }
+
+            if (!RuleFits(rule, fieldType))
+            {
+                pc.Diag.Report(annotation.Span, DiagnosticCode.ErrContractRuleType, annotation.Name.Name, fieldType.ToString() ?? "");
+                continue;
+            }
+
+            rules.Add(rule);
+        }
+
+        contract.FieldRules[field.Name.Name] = rules;
+    }
+
+    private static bool RuleFits(ContractRule rule, Type fieldType)
+    {
+        if (fieldType is UnionType union)
+        {
+            return union.Types.Where(member => member.Kind != TypeKind.PrimitiveNil).All(member => RuleFits(rule, member));
+        }
+
+        if (fieldType.Kind == TypeKind.PrimitiveAny) return true;
+
+        var isText = fieldType.Kind == TypeKind.PrimitiveString || fieldType is LiteralType { Value.Kind: LiteralKind.String };
+        return rule.Kind switch
+        {
+            ContractRuleKind.Range or ContractRuleKind.Integer => fieldType.Kind == TypeKind.PrimitiveNumber || fieldType is LiteralType { Value.Kind: LiteralKind.Number },
+            ContractRuleKind.Pattern => isText,
+            _ => isText || fieldType.Kind == TypeKind.TableArray
+        };
+    }
+
     /// <summary>
     /// Types <paramref name="table"/> for a value of <paramref name="expected"/>: for a struct,
     /// class or interface its string keys name fields and its function fields take their
@@ -130,7 +202,9 @@ public sealed partial class InferTypesPass
         _shapedTables[table] = shape;
         try
         {
-            return SynthesizeExpr(pc, table);
+            var synthesized = SynthesizeExpr(pc, table);
+            CheckContractLiteral(pc, table, shape);
+            return synthesized;
         }
         finally
         {

@@ -402,9 +402,20 @@ public sealed class DeclGenPass() : Pass(PassName, PassScope.PerBuild, true)
         sb.AppendLine("    end");
     }
 
+    private static void EmitContractRules(StringBuilder sb, InterfaceFieldNode field)
+    {
+        foreach (var annotation in field.Annotations)
+        {
+            var arguments = annotation.Args.Select(argument => (argument.Name == null ? "" : argument.Name + " = ") + LiteralValue.Of(argument.Value)?.Text);
+            sb.Append("        @").Append(annotation.Name.Name);
+            if (annotation.Args.Count > 0) sb.Append('(').Append(string.Join(", ", arguments)).Append(')');
+            sb.AppendLine();
+        }
+    }
+
     private void EmitInterfaceDeclaration(StringBuilder sb, PassContext ctx, PackageContext pkg, InterfaceDecl ifd)
     {
-        sb.Append("    interface ");
+        sb.Append(ifd.IsContract ? "    contract " : "    interface ");
         sb.Append(ifd.Name.Name);
         sb.Append(TypeParamList(ctx, ifd.TypeParams));
         var interfaceType = pkg.Syms.GetByID(ifd.Name.Sym, out var interfaceSymbol) && ctx.Types.GetByID(interfaceSymbol.Type, out var declaredInterface)
@@ -422,6 +433,7 @@ public sealed class DeclGenPass() : Pass(PassName, PassScope.PerBuild, true)
         foreach (var field in ifd.Fields)
         {
             EmitDoc(sb, "        ", field.Doc);
+            if (ifd.IsContract) EmitContractRules(sb, field);
             sb.Append("        ");
             sb.Append(Type.FieldLabel(field.Name.Name));
             sb.Append(": ");

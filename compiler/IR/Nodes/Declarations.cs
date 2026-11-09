@@ -182,6 +182,9 @@ public sealed class InterfaceDecl(
     public List<List<TypeArgRef>> BaseInterfaceTypeArgs { get; set; } = [];
     public List<Annotation> Annotations { get; set; } = [];
 
+    /// <summary>Written <c>contract</c>: a table with any other field does not fit, and its fields can carry rules.</summary>
+    public bool IsContract { get; init; }
+
     /// <summary>
     /// Written <c>declare type Name&lt;T&gt;</c>: a type the compiler builds itself, such as
     /// <c>Partial&lt;T&gt;</c>, declared so it can be found, completed and documented.

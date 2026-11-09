@@ -703,6 +703,12 @@ public interface INebraVisitor<Result> : IParseTreeVisitor<Result> {
 	/// <return>The visitor result.</return>
 	Result VisitInterfaceDecl([NotNull] NebraParser.InterfaceDeclContext context);
 	/// <summary>
+	/// Visit a parse tree produced by <see cref="NebraParser.interfaceKeyword"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	/// <return>The visitor result.</return>
+	Result VisitInterfaceKeyword([NotNull] NebraParser.InterfaceKeywordContext context);
+	/// <summary>
 	/// Visit a parse tree produced by <see cref="NebraParser.typeParamList"/>.
 	/// </summary>
 	/// <param name="context">The parse tree.</param>

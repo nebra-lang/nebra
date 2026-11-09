@@ -151,6 +151,7 @@ public class ResolveTypeRefsPass() : Pass(PassName, PassScope.PerBuild)
 
         var origin = decl.IsDeclare ? null : decl.Name.Span.File;
         var interfaceType = pkg.Types.InterfaceOf(decl.Name.Name, isIntrinsic: decl.IsIntrinsic, origin: origin);
+        interfaceType.IsContract = decl.IsContract;
         interfaceType.ReflectionId = $"{ReflectNamespace(pkg, decl, decl.Name)}::{decl.Name.Name}";
         interfaceType.DeclaredAt ??= decl.Name;
         pkg.Syms.SetType(decl.Name.Sym, interfaceType.ID);

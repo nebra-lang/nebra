@@ -201,6 +201,10 @@
         },
         {
           "name": "storage.type.nebra",
+          "match": "\\bcontract\\b(?=\\s+[A-Za-z_])"
+        },
+        {
+          "name": "storage.type.nebra",
           "match": "\\b(function|class|interface|enum|extends|extend|implements|constructor|new)\\b"
         },
         {

@@ -33,8 +33,19 @@ public static class AnnotationCatalog
         new(BuiltinAnnotations.Reflectable, null, [], null,
             "Includes the declaration in runtime reflection when `[reflection] mode` is `\"annotated\"`."),
         new(BuiltinAnnotations.OverrideCtor, [AnnotationTargetKind.Class], [new AnnotationParamSpec("template", "string", null, true)], null,
-            "Replaces how `new` constructs the class in the generated Lua. `$class` stands for the class and `$args` for the arguments.")
+            "Replaces how `new` constructs the class in the generated Lua. `$class` stands for the class and `$args` for the arguments."),
+        ContractRuleEntry(ContractRules.Range, "Limits a number in a contract: `@range(0, 150)`, `@range(min = 0)`.", "min", "max"),
+        ContractRuleEntry(ContractRules.Integer, "Requires a whole number in a contract."),
+        ContractRuleEntry(ContractRules.Length, "Limits the length of a string or list in a contract: `@length(8)`, `@length(1, 32)`, `@length(max = 32)`.", "min", "max"),
+        ContractRuleEntry(ContractRules.NonEmpty, "Requires a string or list in a contract to have content."),
+        ContractRuleEntry(ContractRules.Pattern, "Requires a string in a contract to match a Lua pattern: `@pattern(\"^%a+$\")`.", "pattern"),
     ];
+
+    private static AnnotationEntry ContractRuleEntry(string name, string documentation, params string[] parameters)
+    {
+        var specs = parameters.Select(parameter => new AnnotationParamSpec(parameter, parameter == "pattern" ? "string" : "number", null, parameter == "pattern")).ToList();
+        return new AnnotationEntry(name, [AnnotationTargetKind.InterfaceField], specs, null, documentation);
+    }
 
     public static IEnumerable<AnnotationEntry> All(AnalysisResult result)
     {
@@ -131,7 +142,7 @@ public static class AnnotationCatalog
         if (declaration.StartsWith("function ") || declaration.StartsWith("async function ")) return AnnotationTargetKind.Function;
         if (declaration.StartsWith("local ")) return AnnotationTargetKind.Variable;
         if (declaration.StartsWith("class ") || declaration.StartsWith("abstract class ")) return AnnotationTargetKind.Class;
-        if (declaration.StartsWith("interface ")) return AnnotationTargetKind.Interface;
+        if (declaration.StartsWith("interface ") || declaration.StartsWith("contract ")) return AnnotationTargetKind.Interface;
         if (declaration.StartsWith("enum ")) return AnnotationTargetKind.Enum;
         if (declaration.StartsWith("extend ")) return AnnotationTargetKind.Extend;
         return null;

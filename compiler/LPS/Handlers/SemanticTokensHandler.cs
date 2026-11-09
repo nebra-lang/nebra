@@ -357,10 +357,15 @@ public sealed class SemanticTokensHandler(NebraWorkspace workspace) : SemanticTo
             var keyword = tokens[index];
             if (keyword.Type != NebraLexer.NAME) continue;
             if (!IsMethodKeyword(tokens, index) && !IsOperatorKeyword(tokens, index) && !IsImportKeyword(tokens, index)
-                && !IsSealedKeyword(tokens, index)) continue;
+                && !IsSealedKeyword(tokens, index) && !IsContractKeyword(tokens, index)) continue;
 
             overrides[(keyword.Line - 1, keyword.Column)] = 0;
         }
+    }
+
+    private static bool IsContractKeyword(List<IToken> tokens, int index)
+    {
+        return tokens[index].Text == "contract" && tokens[index + 1].Type == NebraLexer.NAME;
     }
 
     private static bool IsSealedKeyword(List<IToken> tokens, int index)

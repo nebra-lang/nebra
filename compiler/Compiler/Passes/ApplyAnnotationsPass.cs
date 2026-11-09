@@ -312,7 +312,11 @@ public sealed class ApplyAnnotationsPass()
                 foreach (var a in cd.Accessors) ProcessParameterAnnotations(ctx, registry, a.Parameters);
                 break;
             case InterfaceDecl id:
-                ProcessAnnotatedList(ctx, registry, id.Fields, f => f.Annotations, AnnotationTargetKind.InterfaceField);
+                if (!id.IsContract)
+                {
+                    ProcessAnnotatedList(ctx, registry, id.Fields, f => f.Annotations, AnnotationTargetKind.InterfaceField);
+                }
+
                 ProcessAnnotatedList(ctx, registry, id.Methods, m => m.Annotations,
                     AnnotationTargetKind.InterfaceMethod);
                 foreach (var m in id.Methods) ProcessParameterAnnotations(ctx, registry, m.Parameters);

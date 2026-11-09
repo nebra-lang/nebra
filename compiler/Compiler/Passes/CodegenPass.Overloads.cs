@@ -258,6 +258,8 @@ public sealed partial class CodegenPass
             }
             case ClassType classType when precise && classType.NearestIsTemplate == null:
                 return $"{gen.GetClassCheckHelper()}({value}, \"{classType.Name}\")";
+            case InterfaceType { IsContract: true } contract:
+                return $"{ContractValidator(gen, contract)}({value})";
             case InterfaceType interfaceType when precise:
                 return $"(type({value}) == \"table\" and {value}.__interfaces ~= nil and {value}.__interfaces[\"{interfaceType.Name}\"] == true)";
             case EnumType enumType:

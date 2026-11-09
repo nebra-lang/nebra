@@ -941,6 +941,21 @@ public sealed class InterfaceType(
     /// <summary>The file that compiles this interface; <c>null</c> for a declaration, which extends the others of its name.</summary>
     public string? Origin { get; init; }
 
+    /// <summary>Written <c>contract</c>: a table with any other field does not fit.</summary>
+    public bool IsContract { get; set; }
+
+    /// <summary>The rules written on the fields of a contract, by field name.</summary>
+    public Dictionary<string, List<Nebra.Compiler.Annotations.ContractRule>> FieldRules { get; init; } = [];
+
+    /// <summary>The rules on field <paramref name="name"/> of this contract and the ones it extends.</summary>
+    public IReadOnlyList<Nebra.Compiler.Annotations.ContractRule> RulesOf(string name)
+    {
+        return BaseInterfacesOf(this).Prepend(this)
+            .SelectMany(member => member.FieldRules.GetValueOrDefault(name) ?? [])
+            .ToList();
+    }
+
+
     private string QualifiedName => Origin == null ? Name : $"{Name}@{Origin}";
     public List<InterfaceType> BaseInterfaces { get; } = baseInterfaces;
     public Dictionary<string, StructType.Field> Fields { get; } = new();

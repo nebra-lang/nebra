@@ -280,7 +280,7 @@ public sealed class HoverRenderer(AnalysisResult result, NebraWorkspace workspac
         if (interfaceType.IsIntrinsic)
             return $"type {interfaceType.Name}<{string.Join(", ", interfaceType.TypeParams.Select(parameter => parameter.Name))}>";
 
-        var header = "interface " + interfaceType.Name;
+        var header = (interfaceType.IsContract ? "contract " : "interface ") + interfaceType.Name;
         if (interfaceType.BaseInterfaces.Count > 0) header += " extends " + string.Join(", ", interfaceType.BaseInterfaces.Select(iface => iface.Name));
 
         var members = new List<string>();
@@ -390,7 +390,7 @@ public sealed class HoverRenderer(AnalysisResult result, NebraWorkspace workspac
             DeclareFunctionDecl function => $"function {string.Join(".", function.NamePath.Select(name => name.Name))}",
             DeclareVariableDecl variable => variable.Name.Name,
             ClassDecl classDecl => $"class {classDecl.Name.Name}",
-            InterfaceDecl interfaceDecl => $"interface {interfaceDecl.Name.Name}",
+            InterfaceDecl interfaceDecl => $"{(interfaceDecl.IsContract ? "contract" : "interface")} {interfaceDecl.Name.Name}",
             EnumDecl enumDecl => $"enum {enumDecl.Name.Name}",
             _ => null,
         }).OfType<string>().Select(line => "    " + line);

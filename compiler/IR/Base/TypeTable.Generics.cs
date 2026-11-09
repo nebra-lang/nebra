@@ -43,6 +43,8 @@ public sealed partial class TypeTable
 
         var instance = (InterfaceType)DeclareType(new InterfaceType(definition.Name, [])
         {
+            IsContract = definition.IsContract,
+            FieldRules = definition.FieldRules,
             GenericDefinition = definition,
             TypeArguments = arguments,
             Origin = definition.Origin,

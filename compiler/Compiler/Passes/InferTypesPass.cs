@@ -540,6 +540,18 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
         }
     }
 
+    /// <summary>Types a returned value, a lone table literal by the shape the function declares it returns.</summary>
+    private void SynthesizeReturned(PassContext pc, Expr value, int returnedCount)
+    {
+        if (value is TableConstructorExpr table && returnedCount == 1 && _declaredReturn != TypID.Invalid)
+        {
+            SynthesizeTableFor(pc, table, Evaluate(pc, _declaredReturn));
+            return;
+        }
+
+        SynthesizeExpr(pc, value);
+    }
+
     /// <summary>
     /// Resolves a function body: the same walk as <see cref="ResolveStmts"/>, but with the
     /// enclosing-loop count reset for its duration. A loop around the function is not one a
@@ -781,7 +793,7 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
                 if (_finallyDepth > 0) pc.Diag.Report(returnStmt.Span, DiagnosticCode.ErrReturnInFinally);
                 foreach (var value in returnStmt.Values)
                 {
-                    SynthesizeExpr(pc, value);
+                    SynthesizeReturned(pc, value, returnStmt.Values.Count);
                 }
 
                 AdoptReturnedLiterals(pc, returnStmt.Values);
@@ -1040,6 +1052,11 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
             var ifaceTyp = LookupSymbolType(pc, iface.Sym);
             if (ifaceTyp != TypID.Invalid && pc.Types.GetByID(ifaceTyp, out var it) && it is InterfaceType ifaceType)
             {
+                if (ifaceType.IsContract)
+                {
+                    pc.Diag.Report(iface.Span, DiagnosticCode.ErrImplementsContract, iface.Name);
+                }
+
                 var interfaceArgs = index < cd.InterfaceTypeArgs.Count ? cd.InterfaceTypeArgs[index] : [];
                 AddOnce(classType.Interfaces, (InterfaceType)ResolveTypeRefsPass.Instantiation(pc.Types, ifaceType, interfaceArgs));
                 ReportBaseTypeArguments(pc, iface, ifaceType.TypeParams.Count, interfaceArgs);
@@ -1977,6 +1994,7 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
             ifaceType.Fields[field.Name.Name] = new StructType.Field(field.Name, fType);
             ifaceType.MemberDeclarations.TryAdd(field.Name.Name, field.Name);
             StampMemberSide(pc, field.Annotations, ifaceType.FieldSides, field.Name.Name);
+            if (id.IsContract) ReadContractRules(pc, ifaceType, field, fType);
         }
 
         var defaultBodies = new List<(InterfaceMethodNode Method, Type ReturnType)>();
@@ -5068,6 +5086,13 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
         return field == null ? IsNullable(pc, expected.ID) : IsTypeAssignable(pc, expected.ID, field.Type.ID);
     }
 
+    private static bool HasFieldOutside(StructType table, InterfaceType contract)
+    {
+        var members = Type.BaseInterfacesOf(contract).Prepend(contract).ToList();
+        return table.Fields.Any(field => !field.IsMeta
+                                         && !members.Any(member => member.Fields.ContainsKey(field.Name.Name) || member.Methods.ContainsKey(field.Name.Name)));
+    }
+
     /// <summary>
     /// Whether a table literal's type satisfies <paramref name="contract"/> structurally: it holds
     /// every field the interface and the interfaces it extends declare, and a function for each of
@@ -5075,6 +5100,8 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
     /// </summary>
     private bool TableFitsInterface(PassContext pc, StructType table, InterfaceType contract)
     {
+        if (contract.IsContract && HasFieldOutside(table, contract)) return false;
+
         foreach (var iface in Type.BaseInterfacesOf(contract).Prepend(contract))
         {
             if (!iface.Fields.All(field => HasFittingField(pc, table, field.Key, field.Value.Type))) return false;

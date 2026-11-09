@@ -352,9 +352,15 @@ operatorSymbol
     ;
 
 interfaceDecl
-    : annotationList INTERFACE NAME typeParamList? (EXTENDS classRef (COMMA classRef)*)?
+    : annotationList interfaceKeyword NAME typeParamList? (EXTENDS classRef (COMMA classRef)*)?
       interfaceMember*
       END
+    ;
+
+// `contract` is a strict interface. It stays a plain name everywhere else.
+interfaceKeyword
+    : INTERFACE
+    | {TokenStream.LT(1).Text == "contract"}? NAME
     ;
 
 // --- Generic Type Parameters (on class/interface/function decls) ---
@@ -483,7 +489,7 @@ declareBody
     | ABSTRACT? classModifier? CLASS NAME typeParamList? (EXTENDS classRef)? (IMPLEMENTS classRef (COMMA classRef)*)?
       declareClassMember*
       END                                                        # DeclareClass
-    | INTERFACE NAME typeParamList? (EXTENDS classRef (COMMA classRef)*)?
+    | interfaceKeyword NAME typeParamList? (EXTENDS classRef (COMMA classRef)*)?
       declareInterfaceMember*
       END                                                        # DeclareInterface
     | NAME NAME typeParamList                                    # DeclareIntrinsicType
@@ -543,7 +549,7 @@ declareModuleMember
     | annotationList ABSTRACT? classModifier? CLASS NAME typeParamList? (EXTENDS classRef)? (IMPLEMENTS classRef (COMMA classRef)*)?
       declareClassMember*
       END                                                        # ModuleDeclareClass
-    | annotationList INTERFACE NAME typeParamList? (EXTENDS classRef (COMMA classRef)*)?
+    | annotationList interfaceKeyword NAME typeParamList? (EXTENDS classRef (COMMA classRef)*)?
       declareInterfaceMember*
       END                                                        # ModuleDeclareInterface
     | annotationList EXTEND typeExpr declareExtendMethod* END     # ModuleDeclareExtend

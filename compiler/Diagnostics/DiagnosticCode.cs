@@ -480,6 +480,27 @@ public enum DiagnosticCode
 
     [Level(DiagnosticLevel.Error)]
     [Category(DiagnosticCategory.Semantic)]
+    [Format("'{0}' is a contract, which only describes plain tables, so a class cannot implement it")]
+    [Help("use an interface to describe a class")]
+    ErrImplementsContract = 0x4049,
+
+    [Level(DiagnosticLevel.Error)]
+    [Category(DiagnosticCategory.Semantic)]
+    [Format("field '{0}' of contract '{1}' {2}")]
+    ErrContractViolation = 0x404A,
+
+    [Level(DiagnosticLevel.Error)]
+    [Category(DiagnosticCategory.Semantic)]
+    [Format("@{0} {1}")]
+    ErrContractRuleInvalid = 0x404B,
+
+    [Level(DiagnosticLevel.Error)]
+    [Category(DiagnosticCategory.Semantic)]
+    [Format("@{0} cannot be used on a field of type '{1}'")]
+    ErrContractRuleType = 0x404C,
+
+    [Level(DiagnosticLevel.Error)]
+    [Category(DiagnosticCategory.Semantic)]
     [Format("{0}")]
     [Help("move the use below the definition, or into a function that runs later")]
     ErrUsedBeforeDefinition = 0x403A,

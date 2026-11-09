@@ -50,6 +50,11 @@ internal partial class IRVisitor
     /// Whether a class carries the <c>sealed</c> modifier. Any other word before <c>class</c> is
     /// reported, since <c>sealed</c> is the only modifier there.
     /// </summary>
+    private static bool IsContractKeyword(NebraParser.InterfaceKeywordContext keyword)
+    {
+        return keyword.NAME() != null;
+    }
+
     private bool IsSealedModifier(NebraParser.ClassModifierContext? modifier)
     {
         if (modifier == null) return false;
@@ -387,7 +392,7 @@ internal partial class IRVisitor
 
         var (fields, methods) = VisitDeclareInterfaceMembers(context.declareInterfaceMember());
 
-        var ifaceDecl = new InterfaceDecl(NewNodeID, SpanFromCtx(context), name, baseInterfaces, fields, methods, isDeclare: true);
+        var ifaceDecl = new InterfaceDecl(NewNodeID, SpanFromCtx(context), name, baseInterfaces, fields, methods, isDeclare: true) { IsContract = IsContractKeyword(context.interfaceKeyword()) };
         ifaceDecl.TypeParams = typeParams;
         ifaceDecl.BaseInterfaceTypeArgs = baseInterfaceTypeArgs;
         return ifaceDecl;
@@ -553,7 +558,7 @@ internal partial class IRVisitor
 
         var (fields, methods) = VisitDeclareInterfaceMembers(context.declareInterfaceMember());
 
-        var ifaceModDecl = new InterfaceDecl(NewNodeID, SpanFromCtx(context), name, baseInterfaces, fields, methods, isDeclare: true);
+        var ifaceModDecl = new InterfaceDecl(NewNodeID, SpanFromCtx(context), name, baseInterfaces, fields, methods, isDeclare: true) { IsContract = IsContractKeyword(context.interfaceKeyword()) };
         ifaceModDecl.TypeParams = typeParams;
         ifaceModDecl.BaseInterfaceTypeArgs = baseInterfaceTypeArgs;
         ifaceModDecl.Annotations = VisitAnnotationListContent(context.annotationList());
@@ -925,7 +930,7 @@ internal partial class IRVisitor
             }
         }
 
-        var ifaceRegular = new InterfaceDecl(NewNodeID, SpanFromCtx(context), name, baseInterfaces, fields, methods);
+        var ifaceRegular = new InterfaceDecl(NewNodeID, SpanFromCtx(context), name, baseInterfaces, fields, methods) { IsContract = IsContractKeyword(context.interfaceKeyword()) };
         ifaceRegular.TypeParams = typeParams;
         ifaceRegular.BaseInterfaceTypeArgs = baseInterfaceTypeArgs;
         ifaceRegular.Annotations = VisitAnnotationListContent(context.annotationList());

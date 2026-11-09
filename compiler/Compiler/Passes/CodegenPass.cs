@@ -2068,6 +2068,9 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
                 gen.Write($", {PatternTypeName(ctx, pkg, tchk.TargetType, instance.Name)}, \"{instance.Name}\", {arguments})");
                 break;
             }
+            case InterfaceType { IsContract: true } contract:
+                EmitContractCheck(ctx, pkg, gen, contract, tchk.Inner);
+                break;
             case InterfaceType { GenericDefinition: not null } instance when RuntimeArguments(instance.TypeArguments) is { } arguments:
             {
                 gen.Write(gen.GetGenericInterfaceCheckHelper() + "(");
@@ -2363,6 +2366,9 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
                                           + PatternTypeName(ctx, pkg, pattern.TypeRef, ct.Name) + ")");
                                 break;
                             }
+                            case InterfaceType { IsContract: true } contract:
+                                gen.Write($"{ContractValidator(gen, contract)}({scrutineeTemp})");
+                                break;
                             case InterfaceType it:
                             {
                                 var helper = gen.GetInstanceOfHelper();
