@@ -294,6 +294,30 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
     }
 
     /// <summary>
+    /// Checks the default values of the fields of a class where its bodies are resolved, when the
+    /// values declared before the class have their types. A field without an annotation takes
+    /// its type from the default, which is known only now if the default reads such a value.
+    /// </summary>
+    private void ResolveFieldDefaults(PassContext pc, ClassDecl cd, ClassType classType)
+    {
+        foreach (var field in cd.Fields.Where(field => field.DefaultValue != null))
+        {
+            CheckFieldDefault(pc, field);
+            if (field.TypeAnnotation != null) continue;
+
+            var fieldType = GetType(pc, field.DefaultValue!.Type);
+            classType.InstanceFields[field.Name.Name] = new StructType.Field(field.Name, fieldType);
+            if (field.IsStatic) SetStaticMemberType(pc, cd, field.Name.Name, 0, fieldType);
+        }
+    }
+
+    /// <summary>The same context with its diagnostics going nowhere, for a first look at code that is checked again later.</summary>
+    private static PassContext WithoutDiagnostics(PassContext pc)
+    {
+        return new PassContext(new DiagnosticsBag(), pc.Pkgs, pc.Pkg, pc.File, pc.Types, pc.SymAlloc, pc.ScopeAlloc, pc.NodeAlloc, pc.Names, pc.Cache, pc.Config);
+    }
+
+    /// <summary>
     /// Types the default value of a class field and checks it against the field's annotation the
     /// way a local's value is checked against its own, so <c>name: string = nil</c> is rejected
     /// under <c>strict_nil</c> and a default of the wrong type always is.
@@ -499,7 +523,7 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
         {
             switch (stmt)
             {
-                case ClassDecl cd:
+                case ClassDecl { IsDeclare: true } cd:
                     ResolveClassDecl(pc, cd);
                     break;
                 case InterfaceDecl id:
@@ -517,7 +541,7 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
                 case ExportStmt es:
                     switch (es.Declaration)
                     {
-                        case ClassDecl ecd: ResolveClassDecl(pc, ecd); break;
+                        case ClassDecl { IsDeclare: true } ecd: ResolveClassDecl(pc, ecd); break;
                         case InterfaceDecl eid: ResolveInterfaceDecl(pc, eid); break;
                         case DeclareVariableDecl edvd: ResolveDecl(pc, edvd); break;
                         case DeclareFunctionDecl edfd: ResolveDecl(pc, edfd); break;
@@ -1070,7 +1094,7 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
 
         foreach (var field in cd.Fields)
         {
-            if (field.DefaultValue != null) CheckFieldDefault(pc, field);
+            if (field.DefaultValue != null && field.TypeAnnotation == null) CheckFieldDefault(WithoutDiagnostics(pc), field);
             var fieldType = field.TypeAnnotation != null && field.TypeAnnotation.ResolvedType != TypID.Invalid
                 ? GetType(pc, field.TypeAnnotation.ResolvedType)
                 : (field.DefaultValue != null ? GetType(pc, field.DefaultValue.Type) : pc.Types.PrimAny);
@@ -1245,6 +1269,7 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
         List<(ClassMethodNode Method, Type ReturnType)> methodBodies)
     {
         using var classTypeParams = FixTypeParams(cd.TypeParams);
+        ResolveFieldDefaults(pc, cd, classType);
         foreach (var constructor in cd.Constructors)
         {
             foreach (var defer in DeferStmt.In(constructor.Body))

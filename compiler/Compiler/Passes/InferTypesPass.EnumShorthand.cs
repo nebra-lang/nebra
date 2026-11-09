@@ -11,9 +11,8 @@ public sealed partial class InferTypesPass
     /// Each one an enum is expected for reads as a member of it; the rest are reported once
     /// every body is resolved.
     /// </summary>
-    private readonly List<(PassContext Context, NameExpr Name)> _unresolvedNames = [];
+    private readonly Dictionary<NameExpr, PassContext> _unresolvedNames = [];
 
-    private readonly HashSet<NameExpr> _seenUnresolvedNames = [];
 
     /// <summary>
     /// The type of a name without a declaration in scope: the enum it was read as a member of, or
@@ -22,7 +21,7 @@ public sealed partial class InferTypesPass
     private TypID SynthesizeUnresolvedName(PassContext pc, NameExpr name)
     {
         if (name.Enum != null) return name.Enum.ID;
-        if (_seenUnresolvedNames.Add(name)) _unresolvedNames.Add((pc, name));
+        _unresolvedNames[name] = pc;
         return pc.Types.PrimAny.ID;
     }
 
@@ -77,12 +76,11 @@ public sealed partial class InferTypesPass
     /// <summary>Reports every name without a declaration that no enum was expected for.</summary>
     private void ReportUnresolvedNames()
     {
-        foreach (var (pc, name) in _unresolvedNames)
+        foreach (var (name, pc) in _unresolvedNames)
         {
             if (name.Enum == null) pc.Diag.Report(name.Name.Span, DiagnosticCode.ErrUndeclaredSymbol, name.Name.Name);
         }
 
         _unresolvedNames.Clear();
-        _seenUnresolvedNames.Clear();
     }
 }
