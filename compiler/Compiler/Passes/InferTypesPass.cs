@@ -2625,7 +2625,7 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
         var inferred = new TypID[varCount];
         for (var i = 0; i < varCount; i++) inferred[i] = tt.PrimAny.ID;
 
-        if (IsNextOverTable(pc, gf, iterTypes, out var iteratedTable))
+        if (IsNextOverTable(pc, gf, iterTypes, out var iteratedTable) || IsIteratorCallOverTable(pc, gf, out iteratedTable))
         {
             iterTypes = [iteratedTable];
         }
@@ -2661,6 +2661,23 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
         {
             pc.Pkg!.Syms.SetType(gf.VarNames[i].Sym, inferred[i]);
         }
+    }
+
+    /// <summary>
+    /// Whether the loop is written <c>for i, v in ipairs(t)</c> or <c>for k, v in pairs(t)</c> with
+    /// the functions of the standard library over a table whose type is known, so its variables
+    /// take the table's types rather than the declared <c>any</c> of those functions.
+    /// </summary>
+    private bool IsIteratorCallOverTable(PassContext pc, GenericForStmt gf, out TypID table)
+    {
+        table = TypID.Invalid;
+        if (gf.Iterators is not [FunctionCallExpr { Callee: NameExpr callee, Arguments: [var argument] }]) return false;
+        if (callee.Name.Name is not ("ipairs" or "pairs")) return false;
+        if (!pc.Pkg!.Syms.GetByID(callee.Name.Sym, out var symbol) || !symbol.Flags.HasFlag(SymbolFlags.External)) return false;
+
+        table = StripNil(pc, argument.Type);
+        var isList = pc.Types.GetByID(table, out var type) && type is TableArrayType;
+        return callee.Name.Name == "pairs" ? isList || type is TableMapType : isList;
     }
 
     /// <summary>
