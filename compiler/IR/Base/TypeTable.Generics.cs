@@ -82,6 +82,7 @@ public sealed partial class TypeTable
             instance.IsSealed = definition.IsSealed;
             instance.HasLocalConstructor = definition.HasLocalConstructor;
             instance.CtorTemplate = definition.CtorTemplate;
+            instance.InheritTemplate = definition.InheritTemplate;
             instance.ReflectionId = definition.ReflectionId;
             instance.DeclaredAt = definition.DeclaredAt;
             instance.ConstructorSide = definition.ConstructorSide;

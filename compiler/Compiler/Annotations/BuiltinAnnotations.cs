@@ -13,6 +13,7 @@ public static class BuiltinAnnotations
 {
     public const string Side = "side";
     public const string OverrideCtor = "overrideCtor";
+    public const string OverrideInherit = "overrideInherit";
 
     /// <summary>
     /// Marks a declaration for inclusion under <c>[reflection] mode = "annotated"</c>. Read
@@ -22,7 +23,7 @@ public static class BuiltinAnnotations
     /// </summary>
     public const string Reflectable = "reflectable";
 
-    private static readonly HashSet<string> Names = new(StringComparer.Ordinal) { Side, OverrideCtor, Reflectable };
+    private static readonly HashSet<string> Names = new(StringComparer.Ordinal) { Side, OverrideCtor, OverrideInherit, Reflectable };
 
     public static bool IsBuiltin(string name) => Names.Contains(name);
 
@@ -111,10 +112,29 @@ public static class BuiltinAnnotations
     /// </summary>
     public static string? ExtractOverrideCtor(List<Annotation>? annotations)
     {
+        return ExtractTemplate(annotations, OverrideCtor);
+    }
+
+    /// <summary>
+    /// Extracts the template from <c>@overrideInherit("...")</c> on a class declaration, or null
+    /// when the annotation is absent or its argument is not a string literal. The template is the
+    /// Lua expression creating the table of a class extending this one:
+    /// <list type="bullet">
+    ///   <item><description><c>$base</c> → the resolved name of the class being extended.</description></item>
+    ///   <item><description><c>$name</c> → the name of the new class as a quoted string.</description></item>
+    /// </list>
+    /// </summary>
+    public static string? ExtractOverrideInherit(List<Annotation>? annotations)
+    {
+        return ExtractTemplate(annotations, OverrideInherit);
+    }
+
+    private static string? ExtractTemplate(List<Annotation>? annotations, string annotationName)
+    {
         if (annotations == null || annotations.Count == 0) return null;
         foreach (var ann in annotations)
         {
-            if (ann.Name.Name != OverrideCtor) continue;
+            if (ann.Name.Name != annotationName) continue;
             if (ann.Args.Count == 0) continue;
             if (ann.Args[0].Value is StringLiteralExpr sl) return sl.Value;
         }

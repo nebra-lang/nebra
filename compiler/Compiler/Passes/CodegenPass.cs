@@ -19,6 +19,7 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
     private readonly HashSet<string> _boundExtensions = [];
     private string? _currentFile;
     private string? _superClassName;
+    private ClassType? _hostInheritedClass;
 
     public override bool Run(PassContext context)
     {
@@ -512,9 +513,12 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
     private void EmitClassDecl(PassContext ctx, PackageContext pkg, LuaGenerator gen, ClassDecl cd)
     {
         var enclosingSuper = _superClassName;
+        var enclosingHostInherited = _hostInheritedClass;
         _superClassName = cd.BaseClass != null ? ResolveName(ctx, pkg, cd.BaseClass) : null;
+        _hostInheritedClass = HostInheritedClass(pkg, cd);
         EmitClassDeclBody(ctx, pkg, gen, cd);
         _superClassName = enclosingSuper;
+        _hostInheritedClass = enclosingHostInherited;
     }
 
     private void EmitClassDeclBody(PassContext ctx, PackageContext pkg, LuaGenerator gen, ClassDecl cd)
@@ -528,7 +532,12 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
 
         if (!IsHoisted(className)) gen.Write("local ");
         gen.Write(className);
-        if (hasBase)
+        if (_hostInheritedClass != null)
+        {
+            gen.Write(" = ");
+            gen.Write(ExpandInheritTemplate(_hostInheritedClass, baseName!, cd.Name.Name));
+        }
+        else if (hasBase)
         {
             gen.Write(" = setmetatable({}, { __index = ");
             gen.Write(baseName!);
@@ -545,33 +554,10 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
                             && ctx.Types.GetByID(operatorSymbol.Type, out var operatorType)
             ? operatorType as ClassType
             : null;
-        if (operatorClass != null && (HasClassOperator(operatorClass, "__op_index") || HasClassOperator(operatorClass, "__op_newindex")))
-            EmitDeclaredFieldSet(gen, className, operatorClass);
-
-        if (!hasAccessors && operatorClass != null && HasClassOperator(operatorClass, "__op_index"))
+        if (_hostInheritedClass == null)
         {
-            EmitIndexMetamethod(gen, className);
+            EmitClassMetatable(gen, cd, operatorClass, className, hasAccessors);
         }
-        else if (!hasAccessors)
-        {
-            gen.Write(className);
-            gen.Write(".__index = ");
-            gen.Write(className);
-            gen.NewLine();
-            gen.WriteSemicolon();
-        }
-
-        if (!hasAccessors && operatorClass != null && HasClassOperator(operatorClass, "__op_newindex"))
-            EmitNewIndexMetamethod(gen, className);
-        if (operatorClass != null && HasClassOperator(operatorClass, "__op_call"))
-            EmitCallMetamethod(gen, className);
-
-        gen.Write(className);
-        gen.Write(".__name = \"");
-        gen.Write(cd.Name.Name);
-        gen.Write("\"");
-        gen.NewLine();
-        gen.WriteSemicolon();
 
         EmitImplementedInterfaces(ctx, pkg, gen, cd, className);
 
@@ -709,7 +695,7 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
             gen.WriteSemicolon();
         }
 
-        if (hasBase)
+        if (hasBase && _hostInheritedClass == null)
         {
             var inherited = InheritedMetamethods(operatorClass?.BaseClass);
             if (inherited.Count > 0)
@@ -730,6 +716,38 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
         }
     }
 
+    /// <summary>Makes the table of a class the metatable of its instances and gives it its name.</summary>
+    private void EmitClassMetatable(LuaGenerator gen, ClassDecl cd, ClassType? operatorClass, string className, bool hasAccessors)
+    {
+        if (operatorClass != null && (HasClassOperator(operatorClass, "__op_index") || HasClassOperator(operatorClass, "__op_newindex")))
+            EmitDeclaredFieldSet(gen, className, operatorClass);
+
+        if (!hasAccessors && operatorClass != null && HasClassOperator(operatorClass, "__op_index"))
+        {
+            EmitIndexMetamethod(gen, className);
+        }
+        else if (!hasAccessors)
+        {
+            gen.Write(className);
+            gen.Write(".__index = ");
+            gen.Write(className);
+            gen.NewLine();
+            gen.WriteSemicolon();
+        }
+
+        if (!hasAccessors && operatorClass != null && HasClassOperator(operatorClass, "__op_newindex"))
+            EmitNewIndexMetamethod(gen, className);
+        if (operatorClass != null && HasClassOperator(operatorClass, "__op_call"))
+            EmitCallMetamethod(gen, className);
+
+        gen.Write(className);
+        gen.Write(".__name = \"");
+        gen.Write(cd.Name.Name);
+        gen.Write("\"");
+        gen.NewLine();
+        gen.WriteSemicolon();
+    }
+
     /// <summary>
     /// Emits the constructors of a class: one <c>new</c>, or for overloaded constructors each one
     /// under its variant name, such as <c>new__string</c>, and a <c>new</c> that dispatches to the
@@ -747,6 +765,12 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
     private void EmitConstructorOverloads(PassContext ctx, PackageContext pkg, LuaGenerator gen, ClassDecl cd, ClassType? operatorClass,
         string className, string? baseName, bool hasAccessors)
     {
+        if (_hostInheritedClass != null)
+        {
+            EmitHostInheritedConstructors(ctx, pkg, gen, cd, _hostInheritedClass, className, baseName!);
+            return;
+        }
+
         var overloads = operatorClass?.ConstructorOverloads ?? [];
         if (cd.Constructors.Count < 2 || overloads.Count != cd.Constructors.Count || !OverloadSignature.AreDistinct(overloads, false))
         {
@@ -1116,7 +1140,8 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
         if (className.Sym == SymID.Invalid) return null;
         if (!pkg.Syms.GetByID(className.Sym, out var sym)) return null;
         if (!ctx.Types.GetByID(sym.Type, out var rawType)) return null;
-        return rawType is ClassType ct ? ct.CtorTemplate : null;
+        if (rawType is not ClassType classType) return null;
+        return classType.EffectiveInheritTemplate != null ? classType.NearestCtorTemplate : classType.CtorTemplate;
     }
 
     #endregion
@@ -2697,6 +2722,15 @@ public sealed partial class CodegenPass() : Pass(PassName, PassScope.PerBuild, t
                 gen.Write(", ");
                 EmitExprList(ctx, pkg, gen, mc.Arguments);
             }
+            gen.Write(")");
+            return;
+        }
+
+        if (mc.IsSuper && CallsHostMethod(mc))
+        {
+            EmitExpr(ctx, pkg, gen, mc.Object);
+            gen.Write($".Super:{CalledMethodName(mc)}(");
+            EmitExprList(ctx, pkg, gen, mc.Arguments);
             gen.Write(")");
             return;
         }

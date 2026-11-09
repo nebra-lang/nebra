@@ -468,6 +468,12 @@ public enum DiagnosticCode
 
     [Level(DiagnosticLevel.Error)]
     [Category(DiagnosticCategory.Semantic)]
+    [Format("'{0}' is created by its host through @overrideInherit, so it cannot declare {1}")]
+    [Help("use plain methods instead")]
+    ErrHostInheritedMember = 0x4047,
+
+    [Level(DiagnosticLevel.Error)]
+    [Category(DiagnosticCategory.Semantic)]
     [Format("{0}")]
     [Help("move the use below the definition, or into a function that runs later")]
     ErrUsedBeforeDefinition = 0x403A,

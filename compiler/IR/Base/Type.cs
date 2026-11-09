@@ -822,6 +822,47 @@ public sealed class ClassType(
     public string? CtorTemplate { get; set; }
 
     /// <summary>
+    /// Optional template of the Lua expression that creates the table of this class when it
+    /// extends a class of the host, such as <c>$base.Inherit($name)</c>. Source: a
+    /// <c>@overrideInherit("...")</c> builtin annotation on the class.
+    /// </summary>
+    public string? InheritTemplate { get; set; }
+
+    /// <summary>
+    /// The template creating this class: its own, or the one of the nearest declared class it
+    /// extends. A template on a class compiled from source names that class alone, so it is
+    /// not handed on to the classes extending it. <c>null</c> for an ordinary class.
+    /// </summary>
+    public string? EffectiveInheritTemplate
+    {
+        get
+        {
+            if (InheritTemplate != null) return InheritTemplate;
+
+            for (var current = BaseClass; current != null; current = current.BaseClass)
+            {
+                if (!current.IsCompiledFromSource && current.InheritTemplate != null) return current.InheritTemplate;
+            }
+
+            return null;
+        }
+    }
+
+    /// <summary>The <see cref="CtorTemplate"/> of this class or of the nearest class it extends that has one.</summary>
+    public string? NearestCtorTemplate
+    {
+        get
+        {
+            for (var current = this; current != null; current = current.BaseClass)
+            {
+                if (current.CtorTemplate != null) return current.CtorTemplate;
+            }
+
+            return null;
+        }
+    }
+
+    /// <summary>
     /// The generic class this type instantiates, such as <c>Box</c> for <c>Box&lt;number&gt;</c>;
     /// <c>null</c> for any other class. An instantiation carries the definition's members with its
     /// type arguments substituted, filled in by <see cref="TypeTable.Instantiate(ClassType, List{Type})"/>.

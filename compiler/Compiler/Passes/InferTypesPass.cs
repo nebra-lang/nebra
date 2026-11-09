@@ -1014,6 +1014,9 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
         var ctorTemplate = Nebra.Compiler.Annotations.BuiltinAnnotations.ExtractOverrideCtor(cd.Annotations);
         if (ctorTemplate != null) classType.CtorTemplate = ctorTemplate;
 
+        var inheritTemplate = Nebra.Compiler.Annotations.BuiltinAnnotations.ExtractOverrideInherit(cd.Annotations);
+        if (inheritTemplate != null) classType.InheritTemplate = inheritTemplate;
+
         LinkBaseClass(pc, cd, classType, report: true);
         if (cd.BaseClass != null && classType.BaseClass != null)
         {
@@ -1243,6 +1246,7 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
         {
             CheckInterfaceImplementation(pc, cd, classType);
             CheckAbstractImplementation(pc, cd, classType);
+            CheckHostInheritedMembers(pc, cd, classType);
         }
         finally
         {
@@ -1869,6 +1873,25 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
             if (iface.Methods.ContainsKey(name)) return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// Reports the members a class created by its host cannot have: accessors and the index and
+    /// call operators need a metatable of their own, and the host keeps the metatable of its entities.
+    /// </summary>
+    private static void CheckHostInheritedMembers(PassContext pc, ClassDecl cd, ClassType classType)
+    {
+        if (cd.IsDeclare || cd.BaseClass == null || classType.EffectiveInheritTemplate == null) return;
+
+        foreach (var accessor in cd.Accessors)
+        {
+            pc.Diag.Report(accessor.Span, Diagnostics.DiagnosticCode.ErrHostInheritedMember, cd.Name.Name, "accessors");
+        }
+
+        foreach (var method in cd.Methods.Where(method => method.Name.Name is "__op_index" or "__op_newindex" or "__op_call"))
+        {
+            pc.Diag.Report(method.Span, Diagnostics.DiagnosticCode.ErrHostInheritedMember, cd.Name.Name, "this operator");
+        }
     }
 
     private void CheckAbstractImplementation(PassContext pc, ClassDecl cd, ClassType classType)
