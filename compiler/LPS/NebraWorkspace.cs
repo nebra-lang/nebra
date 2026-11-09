@@ -165,9 +165,6 @@ public sealed class NebraWorkspace
     public Dictionary<string, NebraProject.ExportInfo>? CollectExportsFromModule(AnalysisResult result, string moduleName)
         => ProjectFor(result.FilePath).CollectExportsFromModule(result, moduleName);
 
-    public List<(string AbsPath, string ModulePath)> FindExportingFiles(string symbolName, string requesterFilePath)
-        => ProjectFor(requesterFilePath).FindExportingFiles(symbolName, requesterFilePath);
-
     public bool CompileFile(string filePath, out string message) => ProjectFor(filePath).CompileFile(filePath, out message);
 
     public List<Symbol> CollectVisibleSymbols(AnalysisResult result, ScopeID scopeId)

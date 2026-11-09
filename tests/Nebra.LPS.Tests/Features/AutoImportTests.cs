@@ -35,6 +35,104 @@ public sealed class AutoImportTests
     }
 
     [Fact]
+    public async Task AnExportIsOfferedBeforeTheFirstLetterIsTyped()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("src/lib.neb", Library),
+            ("src/main.neb", "local value = {|cursor|}\nprint(value)\n"));
+
+        await session.OpenAsync("src/main.neb");
+        await session.PublishedDiagnostics("src/lib.neb");
+
+        Assert.Contains("Square", await session.CompletionLabelsAsync("cursor"));
+    }
+
+    [Fact]
+    public async Task AnExportIsNotOfferedInsideAString()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("src/lib.neb", Library),
+            ("src/main.neb", "print(\"{|cursor|}\")\n"));
+
+        await session.OpenAsync("src/main.neb");
+        await session.PublishedDiagnostics("src/lib.neb");
+
+        Assert.DoesNotContain("Square", await session.CompletionLabelsAsync("cursor"));
+    }
+
+    private static readonly (string Path, string Text)[] Package =
+    [
+        ("nebra_modules/orm/nebra.toml", "name = \"orm\"\nversion = \"1.0.0\"\nsource = \"src\"\n"),
+        ("nebra_modules/orm/src/init.neb", "export { Model } from \"./model/Model\"\nexport function connect(): nil\nend\n"),
+        ("nebra_modules/orm/src/model/Model.neb", "export class Model\nend\n"),
+        ("nebra_modules/orm/src/types/Uuid.neb", "export class Uuid\nend\n\nexport function parseUuid(): nil\nend\n"),
+    ];
+
+    private static readonly (string Path, string Text)[] RuntimeGlobalPackage =
+    [
+        ("nebra_modules/orm/nebra.toml", "name = \"orm\"\nversion = \"1.0.0\"\nsource = \"src\"\nruntime_global = \"Orm\"\n"),
+        .. Package.Skip(1),
+    ];
+
+    private static async Task<IReadOnlyList<CompletionItem>> PackageCompletionAsync((string Path, string Text)[] package, string source)
+    {
+        await using var session = await LspSession.StartAsync([.. package, ("src/main.neb", source)]);
+        await session.OpenAsync("src/main.neb");
+        return await session.CompletionItemsAsync("cursor");
+    }
+
+    [Fact]
+    public async Task AnExportOfAnInstalledPackageIsOfferedFromThePackage()
+    {
+        var items = await PackageCompletionAsync(Package, "local value = Mod{|cursor|}\nprint(value)\n");
+
+        var model = Assert.Single(items, item => item.Label == "Model");
+        Assert.Equal(CompletionItemKind.Class, model.Kind);
+        Assert.Equal("orm", model.LabelDetails?.Description);
+        Assert.Equal("import { Model } from \"orm\"\n", Assert.Single(model.AdditionalTextEdits!).NewText);
+    }
+
+    [Fact]
+    public async Task AModuleOfAnInstalledPackageIsOfferedByItsPath()
+    {
+        var items = await PackageCompletionAsync(Package, "local value = parse{|cursor|}\nprint(value)\n");
+
+        Assert.Equal("orm/types/Uuid", Assert.Single(items, item => item.Label == "parseUuid").LabelDetails?.Description);
+    }
+
+    [Fact]
+    public async Task ATypeOfARuntimeGlobalPackageIsImportedAsAType()
+    {
+        var items = await PackageCompletionAsync(RuntimeGlobalPackage, "local value: Uu{|cursor|}\nprint(value)\n");
+
+        Assert.Equal("import type { Uuid } from \"orm/types/Uuid\"\n", Assert.Single(Assert.Single(items, item => item.Label == "Uuid").AdditionalTextEdits!).NewText);
+    }
+
+    [Fact]
+    public async Task ARuntimeGlobalPackageOffersValuesOnlyFromItsRoot()
+    {
+        var labels = (await PackageCompletionAsync(RuntimeGlobalPackage, "local value = {|cursor|}\nprint(value)\n")).Select(item => item.Label).ToList();
+
+        Assert.Contains("connect", labels);
+        Assert.DoesNotContain("parseUuid", labels);
+        Assert.DoesNotContain("Uuid", labels);
+    }
+
+    [Fact]
+    public async Task AnImportIsNotMergedIntoATypeImportOrAReExport()
+    {
+        await using var session = await LspSession.StartAsync(
+            ("src/lib.neb", Library),
+            ("src/main.neb", "import type { Square } from \"lib\"\n\nlocal shape: Square\nprint(shape, far{|cursor|})\n"));
+
+        await session.OpenAsync("src/main.neb");
+        await session.PublishedDiagnostics("src/lib.neb");
+        var items = await session.CompletionItemsAsync("cursor");
+
+        Assert.Equal("import { farewell } from \"lib\"\n", Assert.Single(Assert.Single(items, item => item.Label == "farewell").AdditionalTextEdits!).NewText);
+    }
+
+    [Fact]
     public async Task AnAlreadyImportedNameIsNotOfferedAgain()
     {
         await using var session = await LspSession.StartAsync(

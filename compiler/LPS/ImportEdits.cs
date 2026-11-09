@@ -71,9 +71,31 @@ public static class ImportEdits
         var target = Path.GetFullPath(targetPath);
         var imports = result.Hir.Body.OfType<ImportStmt>().ToList();
 
-        var existing = imports.FirstOrDefault(import => import.Kind == ImportKind.Named
+        var existing = imports.FirstOrDefault(import => IsMergeable(import, false)
             && string.Equals(Resolve(result.FilePath, import.Module.Name, sourceRoot), target, StringComparison.OrdinalIgnoreCase));
 
+        return AddImport(result, imports, existing, name, ModuleSpecifier(result.FilePath, target, sourceRoot), false);
+    }
+
+    /// <summary>
+    /// The edit that imports <paramref name="export"/> of an installed package into
+    /// <paramref name="result"/>, by the same rules as a name of the project.
+    /// </summary>
+    public static TextEdit? AddImport(AnalysisResult result, ImportableExport export)
+    {
+        var imports = result.Hir.Body.OfType<ImportStmt>().ToList();
+        var existing = imports.FirstOrDefault(import => IsMergeable(import, export.TypeOnly) && import.Module.Name == export.Module);
+
+        return AddImport(result, imports, existing, export.Name, export.Module, export.TypeOnly);
+    }
+
+    private static bool IsMergeable(ImportStmt import, bool typeOnly)
+    {
+        return import is { Kind: ImportKind.Named, IsReExport: false } && import.IsTypeImport == typeOnly;
+    }
+
+    private static TextEdit? AddImport(AnalysisResult result, List<ImportStmt> imports, ImportStmt? existing, string name, string module, bool typeOnly)
+    {
         if (existing != null)
         {
             if (existing.Specifiers.Any(specifier => (specifier.Alias ?? specifier.Name).Name == name)) return null;
@@ -82,7 +104,7 @@ public static class ImportEdits
             return new TextEdit
             {
                 Range = WholeLines(existing),
-                NewText = Render(specifiers, existing.Module.Name)
+                NewText = Render(specifiers, existing.Module.Name, typeOnly)
             };
         }
 
@@ -90,7 +112,7 @@ public static class ImportEdits
         return new TextEdit
         {
             Range = new Range(line, 0, line, 0),
-            NewText = Render([name], ModuleSpecifier(result.FilePath, target, sourceRoot))
+            NewText = Render([name], module, typeOnly)
         };
     }
 
@@ -105,9 +127,10 @@ public static class ImportEdits
         return specifier.Alias == null ? specifier.Name.Name : $"{specifier.Name.Name} as {specifier.Alias.Name}";
     }
 
-    public static string Render(IEnumerable<string> specifiers, string module)
+    public static string Render(IEnumerable<string> specifiers, string module, bool typeOnly = false)
     {
-        return $"import {{ {string.Join(", ", specifiers)} }} from \"{module}\"\n";
+        var keyword = typeOnly ? "import type" : "import";
+        return $"{keyword} {{ {string.Join(", ", specifiers)} }} from \"{module}\"\n";
     }
 
     /// <summary>The lines an import statement occupies, from the start of its first line to the start of the next.</summary>

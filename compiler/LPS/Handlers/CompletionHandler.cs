@@ -148,7 +148,10 @@ public sealed class CompletionHandler(NebraWorkspace workspace) : CompletionHand
             }
 
             var visible = symbols.Select(sym => sym.Name).ToHashSet(StringComparer.Ordinal);
-            items.AddRange(AutoImportCompletion.Items(result, workspace.LatestSnapshotFor(result.FilePath), request.Position, typeContext, visible));
+            if (openString == null)
+            {
+                items.AddRange(AutoImportCompletion.Items(result, workspace.LatestSnapshotFor(result.FilePath), typeContext, visible));
+            }
 
             if (typeContext)
             {

@@ -26,7 +26,7 @@ public sealed class CodeActionHandler(NebraWorkspace workspace) : CodeActionHand
 
         if (result != null)
         {
-            CollectImportFixes(result, request, actions);
+            CollectImportFixes(result, await workspace.ProjectFor(result.FilePath).GetSnapshotAsync(ct), request, actions);
             CollectImplementMembersFixes(result, request, actions);
             CollectOrganizeImports(result, actions);
             CollectRefactorings(result, request, actions);
@@ -94,7 +94,7 @@ public sealed class CodeActionHandler(NebraWorkspace workspace) : CodeActionHand
     /// the workspace for files that export a matching symbol and propose an import
     /// edit that adds <c>import { Name } from "&lt;path&gt;"</c> at the top of the file.
     /// </summary>
-    private void CollectImportFixes(AnalysisResult result, CodeActionParams request, List<CommandOrCodeAction> actions)
+    private static void CollectImportFixes(AnalysisResult result, WorkspaceSnapshot snapshot, CodeActionParams request, List<CommandOrCodeAction> actions)
     {
         if (request.Context.Diagnostics == null) return;
 
@@ -105,12 +105,9 @@ public sealed class CodeActionHandler(NebraWorkspace workspace) : CodeActionHand
             var symbolName = ExtractQuotedName(diag.Message);
             if (symbolName == null) continue;
 
-            var candidates = workspace.FindExportingFiles(symbolName, result.FilePath);
-            foreach (var (targetPath, _) in candidates)
+            var fixes = ProjectImports(result, snapshot, symbolName).Concat(DependencyImports(result, symbolName)).ToList();
+            foreach (var (module, importEdit) in fixes)
             {
-                var importEdit = ImportEdits.AddImport(result, symbolName, targetPath);
-                if (importEdit == null) continue;
-
                 var edit = new WorkspaceEdit
                 {
                     Changes = new Dictionary<DocumentUri, IEnumerable<TextEdit>>
@@ -119,16 +116,37 @@ public sealed class CodeActionHandler(NebraWorkspace workspace) : CodeActionHand
                     }
                 };
 
-                var module = ImportEdits.ModuleSpecifier(result.FilePath, targetPath, ImportEdits.SourceRoot(result));
                 actions.Add(new CommandOrCodeAction(new CodeAction
                 {
                     Title = $"Import '{symbolName}' from '{module}'",
                     Kind = CodeActionKind.QuickFix,
                     Diagnostics = new Container<Diagnostic>(diag),
                     Edit = edit,
-                    IsPreferred = candidates.Count == 1
+                    IsPreferred = fixes.Count == 1
                 }));
             }
+        }
+    }
+
+    private static IEnumerable<(string Module, TextEdit Edit)> ProjectImports(AnalysisResult result, WorkspaceSnapshot snapshot, string name)
+    {
+        var sourceRoot = ImportEdits.SourceRoot(result);
+        foreach (var exporter in snapshot.SourceResults())
+        {
+            if (string.Equals(exporter.FilePath, result.FilePath, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!NebraWorkspace.CollectExports(exporter).ContainsKey(name)) continue;
+
+            var edit = ImportEdits.AddImport(result, name, exporter.FilePath);
+            if (edit != null) yield return (ImportEdits.ModuleSpecifier(result.FilePath, exporter.FilePath, sourceRoot), edit);
+        }
+    }
+
+    private static IEnumerable<(string Module, TextEdit Edit)> DependencyImports(AnalysisResult result, string name)
+    {
+        foreach (var export in DependencyExports.Of(result.Snapshot.Config).Where(export => export.Name == name))
+        {
+            var edit = ImportEdits.AddImport(result, export);
+            if (edit != null) yield return (export.Module, edit);
         }
     }
 
