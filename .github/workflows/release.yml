@@ -32,7 +32,7 @@ jobs:
           - os: ubuntu-latest
             rid: linux-arm64
             archive: tar
-          - os: macos-14
+          - os: macos-latest
             rid: osx-arm64
             archive: tar
           - os: windows-latest
