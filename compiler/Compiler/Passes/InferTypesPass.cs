@@ -33,6 +33,7 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
     /// </summary>
     private readonly HashSet<NodeID> _resolvedClassDecls = [];
     private readonly Dictionary<NodeID, List<(ClassMethodNode Method, Type ReturnType)>> _pendingClassBodies = [];
+    private readonly HashSet<ClassMethodNode> _methodsInferringReturn = [];
     private readonly HashSet<NodeID> _resolvedInterfaceDecls = [];
     private readonly HashSet<NodeID> _resolvedExtendDecls = [];
 
@@ -1117,6 +1118,13 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
                 retType = inheritedRet;
             else
                 retType = pc.Types.PrimNil;
+
+            if (InfersReturnType(pc, cd, method, retType))
+            {
+                retType = pc.Types.PrimAny;
+                _methodsInferringReturn.Add(method);
+            }
+
             if (method.IsOperator && !cd.IsDeclare) ReportOperatorReturns(pc, method.Name.Name, method.ReturnType, retType);
             var funcTypId = pc.Types.FuncOf(methodParams, retType, isVararg, varargType, defaultIndices.Count > 0 ? defaultIndices : null, method.IsAsync,
                 predicate: BuildPredicate(pc, method.ReturnType, method.Parameters));
@@ -1237,7 +1245,15 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
         foreach (var (method, returnType) in methodBodies)
         {
             using (FixTypeParams(method.TypeParams))
+            {
+                if (_methodsInferringReturn.Remove(method))
+                {
+                    ResolveMethodInferringReturn(pc, cd, classType, method);
+                    continue;
+                }
+
                 ResolveMethodBody(pc, method.Body, method.ReturnStmt, method.IsAsync, returnType, method.ReturnType?.Span ?? method.Name.Span);
+            }
         }
 
         foreach (var accessor in cd.Accessors)
@@ -1831,7 +1847,8 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
                 name, cd.Name.Name, ifaceType.Name);
         }
 
-        if (!IsTypeAssignable(pc, ifaceFt.ReturnType.ID, classFt.ReturnType.ID))
+        var promisesNoValue = ifaceFt.ReturnType.ID == pc.Types.PrimNil.ID && method is { ReturnType: null };
+        if (!promisesNoValue && !IsTypeAssignable(pc, ifaceFt.ReturnType.ID, classFt.ReturnType.ID))
         {
             pc.Diag.Report(span, Diagnostics.DiagnosticCode.ErrInterfaceMethodReturnType,
                 name, cd.Name.Name, TypeName(pc, classFt.ReturnType.ID),
@@ -1990,7 +2007,7 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
                 }
             }
             var retType = method.ReturnType != null && method.ReturnType.ResolvedType != TypID.Invalid
-                ? GetType(pc, method.ReturnType.ResolvedType) : pc.Types.PrimNil;
+                ? GetType(pc, method.ReturnType.ResolvedType) : UnannotatedReturnType(pc, method.Body, method.ReturnStmt);
             var ifaceFt = (FunctionType)GetType(pc,
                 pc.Types.FuncOf(methodParams, retType, ifaceIsVararg, ifaceVarargType,
                     defaultIndices.Count > 0 ? defaultIndices : null, method.IsAsync,
@@ -2027,6 +2044,90 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
     /// after every member of the owning type has been registered, so the body may call members
     /// declared after it.
     /// </summary>
+    /// <summary>
+    /// Whether a method written without a return type takes it from its body: it returns a value,
+    /// and what it overrides, if anything, does not promise a value of its own.
+    /// </summary>
+    private static bool InfersReturnType(PassContext pc, ClassDecl cd, ClassMethodNode method, Type inherited)
+    {
+        if (cd.IsDeclare || method.IsAbstract || method.ReturnType != null) return false;
+
+        return inherited.ID == pc.Types.PrimNil.ID && ReturnsValue(method.Body, method.ReturnStmt);
+    }
+
+    /// <summary>The return type of a signature written without one, whose body may return a value.</summary>
+    private static Type UnannotatedReturnType(PassContext pc, List<Stmt>? body, ReturnStmt? returnStmt)
+    {
+        return ReturnsValue(body ?? [], returnStmt) ? pc.Types.PrimAny : pc.Types.PrimNil;
+    }
+
+    private static bool ReturnsValue(List<Stmt> body, ReturnStmt? returnStmt)
+    {
+        if (returnStmt is { Values.Count: > 0 }) return true;
+
+        return body.SelectMany(ReturnStatements).Any(statement => statement.Values.Count > 0);
+    }
+
+    /// <summary>Resolves the body of a method without a return type and gives its signature the type the body returns.</summary>
+    private void ResolveMethodInferringReturn(PassContext pc, ClassDecl cd, ClassType classType, ClassMethodNode method)
+    {
+        if (method.IsAsync) _asyncDepth++;
+        ResolveFunctionBody(pc, method.Body, method.ReturnStmt);
+
+        var collected = CollectReturnTypes(pc, method.Body);
+        if (method.ReturnStmt != null)
+        {
+            collected.Add((ComputeReturnType(pc, method.ReturnStmt.Values), method.ReturnStmt.Span));
+        }
+
+        if (method.IsAsync) _asyncDepth--;
+        AdoptReturnType(pc, cd, classType, method, InferReturnType(pc, collected));
+    }
+
+    private void AdoptReturnType(PassContext pc, ClassDecl cd, ClassType classType, ClassMethodNode method, Type returnType)
+    {
+        var name = method.Name.Name;
+        var primary = method.IsStatic ? classType.StaticMethods : classType.Methods;
+        var overloads = (method.IsStatic ? classType.StaticMethodOverloads : classType.MethodOverloads)[name];
+        var index = cd.Methods.Where(candidate => candidate.IsStatic == method.IsStatic && candidate.Name.Name == name).ToList().IndexOf(method);
+
+        var updated = WithReturnType(pc, overloads[index], returnType);
+        overloads[index] = updated;
+        if (index == overloads.Count - 1)
+        {
+            primary[name] = updated;
+        }
+
+        if (method.IsStatic)
+        {
+            SetStaticMemberType(pc, cd, name, index, updated);
+        }
+    }
+
+    private FunctionType WithReturnType(PassContext pc, FunctionType function, Type returnType)
+    {
+        var parameters = function.ParamNames.Zip(function.ParamTypes, (name, type) => new Tuple<string, Type>(name, type)).ToList();
+        var defaults = function.DefaultParams.Count > 0 ? function.DefaultParams : null;
+        return (FunctionType)GetType(pc, pc.Types.FuncOf(parameters, returnType, function.IsVararg, function.VarargType, defaults, function.IsAsync, function.Predicate));
+    }
+
+    /// <summary>The type shared by everything a body returns: the widest of them, or <c>any</c> when they have nothing in common.</summary>
+    private Type InferReturnType(PassContext pc, List<(TypID typ, TextSpan span)> collected)
+    {
+        if (collected.Count == 0) return pc.Types.PrimNil;
+
+        var inferred = collected[0].typ;
+        foreach (var (returned, _) in collected.Skip(1))
+        {
+            if (returned == inferred || IsTypeAssignable(pc, inferred, returned)) continue;
+            if (!IsTypeAssignable(pc, returned, inferred)) return pc.Types.PrimAny;
+
+            inferred = returned;
+        }
+
+        return GetType(pc, inferred);
+    }
+
     private void ResolveMethodBody(PassContext pc, List<Stmt> body, ReturnStmt? returnStmt, bool isAsync, Type returnType,
         Diagnostics.TextSpan returnSpan)
     {
@@ -2068,7 +2169,7 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
                 if (p.DefaultValue != null) SynthesizeExpr(pc, p.DefaultValue);
             }
             var retType = method.ReturnType != null && method.ReturnType.ResolvedType != TypID.Invalid
-                ? GetType(pc, method.ReturnType.ResolvedType) : pc.Types.PrimNil;
+                ? GetType(pc, method.ReturnType.ResolvedType) : UnannotatedReturnType(pc, method.Body, method.ReturnStmt);
 
             if (ed.IsDeclare) continue;
 
@@ -2233,31 +2334,7 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
                 collected.Add((ComputeReturnType(pc, returnStmt.Values), returnStmt.Span));
             }
 
-            if (collected.Count == 0)
-            {
-                returnType = pc.Types.PrimNil;
-            }
-            else
-            {
-                var baseType = collected[0].typ;
-                for (var i = 1; i < collected.Count; i++)
-                {
-                    var rt = collected[i].typ;
-                    if (rt == baseType) continue;
-                    if (IsTypeAssignable(pc, baseType, rt)) continue;
-                    if (IsTypeAssignable(pc, rt, baseType))
-                    {
-                        baseType = rt;
-                    }
-                    else
-                    {
-                        baseType = pc.Types.PrimAny.ID;
-                        break;
-                    }
-                }
-
-                returnType = GetType(pc, baseType);
-            }
+            returnType = InferReturnType(pc, collected);
         }
 
         var funcTyp = pc.Types.FuncOf(paramTypes, returnType, isVararg, varargType,
@@ -3201,31 +3278,7 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
                 collected.Add((ComputeReturnType(pc, fde.ReturnStmt.Values), fde.ReturnStmt.Span));
             }
 
-            if (collected.Count == 0)
-            {
-                returnType = pc.Types.PrimNil;
-            }
-            else
-            {
-                var baseType = collected[0].typ;
-                for (var i = 1; i < collected.Count; i++)
-                {
-                    var rt = collected[i].typ;
-                    if (rt == baseType) continue;
-                    if (IsTypeAssignable(pc, baseType, rt)) continue;
-                    if (IsTypeAssignable(pc, rt, baseType))
-                    {
-                        baseType = rt;
-                    }
-                    else
-                    {
-                        baseType = pc.Types.PrimAny.ID;
-                        break;
-                    }
-                }
-
-                returnType = GetType(pc, baseType);
-            }
+            returnType = InferReturnType(pc, collected);
         }
 
         if (fde.IsAsync) _asyncDepth--;
@@ -4561,55 +4614,29 @@ public sealed partial class InferTypesPass() : Pass(PassName, PassScope.PerBuild
 
     private List<(TypID typ, TextSpan span)> CollectReturnTypes(PassContext pc, List<Stmt> stmts)
     {
-        var result = new List<(TypID, TextSpan)>();
-        foreach (var stmt in stmts)
-        {
-            CollectReturnTypesStmt(pc, stmt, result);
-        }
-
-        return result;
+        return stmts.SelectMany(ReturnStatements)
+            .Select(statement => (ComputeReturnType(pc, statement.Values), statement.Span))
+            .ToList();
     }
 
-    private void CollectReturnTypesStmt(PassContext pc, Stmt stmt, List<(TypID, TextSpan)> result)
+    /// <summary>The return statements of <paramref name="stmt"/>, its nested blocks included and the functions inside it left out.</summary>
+    private static IEnumerable<ReturnStmt> ReturnStatements(Stmt stmt)
     {
-        switch (stmt)
+        return stmt switch
         {
-            case ReturnStmt rs:
-                result.Add((ComputeReturnType(pc, rs.Values), rs.Span));
-                break;
-            case DoBlockStmt db:
-                foreach (var s in db.Body) CollectReturnTypesStmt(pc, s, result);
-                break;
-            case TryStmt tryStmt:
-                foreach (var s in tryStmt.Body) CollectReturnTypesStmt(pc, s, result);
-                foreach (var s in tryStmt.Catch?.Body ?? []) CollectReturnTypesStmt(pc, s, result);
-                break;
-            case IfStmt ifs:
-                foreach (var s in ifs.Body) CollectReturnTypesStmt(pc, s, result);
-                foreach (var e in ifs.ElseIfs)
-                {
-                    foreach (var s in e.Body) CollectReturnTypesStmt(pc, s, result);
-                }
-
-                if (ifs.ElseBody != null)
-                {
-                    foreach (var s in ifs.ElseBody) CollectReturnTypesStmt(pc, s, result);
-                }
-
-                break;
-            case WhileStmt ws:
-                foreach (var s in ws.Body) CollectReturnTypesStmt(pc, s, result);
-                break;
-            case RepeatStmt rp:
-                foreach (var s in rp.Body) CollectReturnTypesStmt(pc, s, result);
-                break;
-            case NumericForStmt nf:
-                foreach (var s in nf.Body) CollectReturnTypesStmt(pc, s, result);
-                break;
-            case GenericForStmt gf:
-                foreach (var s in gf.Body) CollectReturnTypesStmt(pc, s, result);
-                break;
-        }
+            ReturnStmt statement => [statement],
+            DoBlockStmt block => block.Body.SelectMany(ReturnStatements),
+            TryStmt attempt => attempt.Body.Concat(attempt.Catch?.Body ?? []).SelectMany(ReturnStatements),
+            IfStmt branch => branch.Body
+                .Concat(branch.ElseIfs.SelectMany(elseIf => elseIf.Body))
+                .Concat(branch.ElseBody ?? [])
+                .SelectMany(ReturnStatements),
+            WhileStmt loop => loop.Body.SelectMany(ReturnStatements),
+            RepeatStmt loop => loop.Body.SelectMany(ReturnStatements),
+            NumericForStmt loop => loop.Body.SelectMany(ReturnStatements),
+            GenericForStmt loop => loop.Body.SelectMany(ReturnStatements),
+            _ => []
+        };
     }
 
     private TypID ComputeReturnType(PassContext pc, List<Expr> values)

@@ -130,7 +130,7 @@ public sealed partial class InferTypesPass
 
         var returnType = member.ReturnType != null && member.ReturnType.ResolvedType != TypID.Invalid
             ? GetType(pc, member.ReturnType.ResolvedType)
-            : pc.Types.PrimNil;
+            : UnannotatedReturnType(pc, member.Body, member.ReturnStmt);
         return (FunctionType)GetType(pc, pc.Types.FuncOf(parameters, returnType, isVararg, varargType,
             defaultIndices.Count > 0 ? defaultIndices : null, member.IsAsync));
     }
